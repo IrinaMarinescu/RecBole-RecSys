@@ -612,3 +612,34 @@ class ContextRecommender(AbstractRecommender):
         # sparse_embedding shape: [batch_size, num_token_seq_field+num_token_field, embed_dim] or None
         # dense_embedding shape: [batch_size, num_float_field, 2] or [batch_size, num_float_field, embed_dim] or None
         return sparse_embedding, dense_embedding
+
+class ContentBasedRecommender(AbstractRecommender):
+
+    type = ModelType.CONTENT_BASED
+
+    def __init__(self, config, dataset):
+        super(ContentBasedRecommender, self).__init__()
+
+        self.USER_ID = config["USER_ID_FIELD"]
+        self.ITEM_ID = config["ITEM_ID_FIELD"]
+        self.RATING = config["RATING_FIELD"]
+        self.n_users = dataset.num(self.USER_ID)
+        self.n_items = dataset.num(self.ITEM_ID)
+
+        self.bert_model = config['bert_model']
+        self.content = config['content']
+
+        self.max_seq_length = config['max_seq_length']
+        self.pooling_strategy = config['pooling_strategy']
+        self.batch_size = config['batch_size']
+
+        self.aggregation_method = config['aggregation_method']
+        self.pos_rating_threshold = config['pos_rating_threshold']
+        self.cold_start_strategy = config['cold_start_strategy']
+
+        self.similarity_metric = config['similarity_metric']
+        self.score_mapping = config['score_mapping']
+        self.top_k = config['top_k']
+        self.filter_interacted = config['filter_interacted']
+
+        self.device = config["device"]

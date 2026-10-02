@@ -313,7 +313,7 @@ class KnowledgeBasedDataset(Dataset):
             if ftype == FeatureType.TOKEN:
                 feat[field] = new_idx
             else:
-                split_point = np.cumsum(feat[field].agg(len))[:-1]
+                split_point = np.cumsum(feat[field].map(len))[:-1]
                 feat[field] = np.split(new_idx, split_point)
 
     def _merge_item_and_entity(self):
