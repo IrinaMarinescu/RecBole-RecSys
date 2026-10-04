@@ -130,30 +130,6 @@ Round 2: ItemKNN, ItemKNN, BPR, ContentBased
 
 Deduplication is **per user**. If one source runs out of candidates, the others continue.
 
-### Regenerate the inputs
-
-Generated files under `outputs/` are gitignored and may be absent. Recreate them with:
-
-```bash
-python run_model.py ItemKNN BPR ContentBased
-```
-
-`configs/models/ContentBased.yaml` runs the teammates' `CB` model unchanged (its defaults from
-`recbole/properties/model/CB.yaml`, with the ML-100K content fields `movie_title` and `class`)
-through the same pipeline as the other models. It therefore uses the same split and the same
-seen-item filtering (valid: train hidden; test: train + valid hidden). Rank is derived from the
-CB similarity scores; its `filter_interacted` setting does not matter because the export masks
-seen items itself.
-
-CB downloads `distilbert-base-uncased` from Hugging Face on the first run. If that fails with
-`CERTIFICATE_VERIFY_FAILED` (HTTPS interception by antivirus/proxy), download it once through the
-Windows certificate store and then run offline:
-
-```bash
-pip install truststore
-python -c "import truststore; truststore.inject_into_ssl(); from huggingface_hub import snapshot_download; snapshot_download('distilbert-base-uncased', allow_patterns=['*.json','*.txt','*.safetensors'])"
-$env:HF_HUB_OFFLINE = "1"     # PowerShell; export HF_HUB_OFFLINE=1 on bash
-```
 
 ### Tune on validation, evaluate once on test
 
