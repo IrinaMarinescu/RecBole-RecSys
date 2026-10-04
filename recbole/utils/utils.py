@@ -66,6 +66,7 @@ def get_model(model_name):
         "context_aware_recommender",
         "sequential_recommender",
         "knowledge_aware_recommender",
+        "content_based_recommender",
         "exlib_recommender",
     ]
 
@@ -102,7 +103,7 @@ def get_trainer(model_type, model_name):
     except AttributeError:
         if model_type == ModelType.KNOWLEDGE:
             return getattr(importlib.import_module("recbole.trainer"), "KGTrainer")
-        elif model_type == ModelType.TRADITIONAL:
+        elif model_type in (ModelType.TRADITIONAL, ModelType.CONTENT_BASED):
             return getattr(
                 importlib.import_module("recbole.trainer"), "TraditionalTrainer"
             )
@@ -259,7 +260,7 @@ def get_flops(model, dataset, device, logger, transform, verbose=False):
     Returns:
         total_ops: the number of flops for each operation.
     """
-    if model.type == ModelType.DECISIONTREE:
+    if model.type in (ModelType.DECISIONTREE, ModelType.CONTENT_BASED):
         return 1
     if model.__class__.__name__ == "Pop":
         return 1

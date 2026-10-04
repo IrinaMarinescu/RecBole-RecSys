@@ -49,6 +49,7 @@ def create_dataset(config):
             ModelType.KNOWLEDGE: "KnowledgeBasedDataset",
             ModelType.TRADITIONAL: "Dataset",
             ModelType.DECISIONTREE: "Dataset",
+            ModelType.CONTENT_BASED: "Dataset",
         }
         dataset_class = getattr(dataset_module, type2class[model_type])
 
