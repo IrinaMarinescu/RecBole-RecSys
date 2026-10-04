@@ -627,7 +627,7 @@ class Config(object):
 
         np.bool = np.bool_
         np.int = np.int_
-        np.float = np.float64
+        np.float = np.float64  # np.float_ / np.complex_ were removed in NumPy 2.0
         np.complex = np.complex128
         np.object = np.object_
         np.str = np.str_
