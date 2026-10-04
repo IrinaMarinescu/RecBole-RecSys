@@ -5,6 +5,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from recbole.utils import ModelType
 from recbole.data.interaction import Interaction
+from collections import defaultdict
 
 class HybridRegression(nn.Module):
     """
@@ -39,11 +40,15 @@ class HybridRegression(nn.Module):
         dataset = valid_data.dataset
         user_field = self.config['USER_ID_FIELD']
         item_field = self.config['ITEM_ID_FIELD']
-        
-        # Extract ground truth positive interactions from validation split
+
         users = dataset.inter_feat[user_field].numpy()
         pos_items = dataset.inter_feat[item_field].numpy()
         
+        # Create a lookup of known positives for each user
+        user_pos_dict = defaultdict(set)
+        for u, i in zip(users, pos_items):
+            user_pos_dict[u].add(i)
+
         samples_u, samples_i, labels = [], [], []
         
         # Generate supervised dataset with sampled negatives
@@ -54,10 +59,14 @@ class HybridRegression(nn.Module):
             
             for _ in range(num_negatives):
                 neg_i = np.random.randint(1, self.n_items)
+                # Ensure the random item is NOT in the user's known positives
+                while neg_i in user_pos_dict[u]:
+                    neg_i = np.random.randint(1, self.n_items)
+                    
                 samples_u.append(u)
                 samples_i.append(neg_i)
                 labels.append(0)
-                
+        
         # Batch extraction to prevent memory issues
         X_features = []
         batch_size = 2048
@@ -85,6 +94,11 @@ class HybridRegression(nn.Module):
         # Fit scaler and train regressor
         X_scaled = self.scaler.fit_transform(X)
         self.regressor.fit(X_scaled, y)
+
+        # Normalize the learned weights and intercept so the coefficients sum to 1.0
+        weight_sum = np.sum(self.regressor.coef_)
+        self.regressor.coef_ = self.regressor.coef_ / weight_sum
+        self.regressor.intercept_ = self.regressor.intercept_ / weight_sum
 
     def predict(self, interaction):
         """Point-wise prediction required by RecBole."""
