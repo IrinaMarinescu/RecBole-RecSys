@@ -16,3 +16,4 @@ plotly>=4.0.0
 texttable>=0.9.0
 psutil>=5.9.0
 transformers
+pydantic
