@@ -4,7 +4,7 @@ import unittest
 
 import pandas as pd
 
-from mixed_hybrid import evaluate_recommendations, mix_recommendations
+from recbole.model.general_recommender.mixed_hybrid import evaluate_recommendations, mix_recommendations
 
 
 def _recs(model_rows):

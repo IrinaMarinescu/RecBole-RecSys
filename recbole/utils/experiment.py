@@ -1,10 +1,14 @@
-"""Shared helpers: build configs, train a RecBole model, export its outputs and load them back.
+"""Project experiment pipeline: build configs, train a model, export its outputs and load them back.
 
-Everything downstream (hybrids, evaluation metrics, rerankers) should read the
-files written here instead of re-running RecBole, so all parts of the project
-work on exactly the same split and the same model scores.
+Used by run_model.py and run_tuning.py in the repository root. Everything downstream
+(hybrids, evaluation metrics, rerankers) should read the files written here instead of
+re-running RecBole, so all parts of the project work on exactly the same split and the
+same model scores:
 
-Output layout (under project/outputs/):
+    from recbole.utils.experiment import load_split, load_scores, load_recs
+
+Configs are read from configs/ (base.yaml, models/, tuned/, hyper/) in the repository root.
+Output layout (under outputs/ in the repository root):
     split/train.tsv, valid.tsv, test.tsv   user_id, item_id, rating, timestamp (original MovieLens ids)
     <experiment>/scores.npz                 full score matrix [n_users x n_items] + user_ids / item_ids
     <experiment>/recs_valid.tsv             top-N per user, training items removed
@@ -25,22 +29,19 @@ import pandas as pd
 import torch
 import yaml
 
-PROJECT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_DIR = os.path.dirname(PROJECT_DIR)
-sys.path.insert(0, REPO_DIR)  # use this repo's RecBole, not a pip-installed one
-
-from recbole.config import Config  # noqa: E402
-from recbole.data import create_dataset, data_preparation  # noqa: E402
-from recbole.data.interaction import Interaction  # noqa: E402
-from recbole.utils import get_trainer, init_logger, init_seed  # noqa: E402
-
-from models import PROJECT_MODELS  # noqa: E402
+from recbole.config import Config
+from recbole.data import create_dataset, data_preparation
+from recbole.data.interaction import Interaction
+from recbole.utils import get_trainer, init_logger, init_seed
 
 # RecBole's NaN filling triggers this pandas>=3 warning; ML-100K interactions have no NaNs, so it is harmless.
 warnings.filterwarnings("ignore", message="A value is being set on a copy of a DataFrame")
 
-CONFIG_DIR = os.path.join(PROJECT_DIR, "configs")
-OUTPUT_DIR = os.path.join(PROJECT_DIR, "outputs")
+# recbole/utils/experiment.py -> repository root
+REPO_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+CONFIG_DIR = os.path.join(REPO_DIR, "configs")
+HYPER_DIR = os.path.join(CONFIG_DIR, "hyper")
+OUTPUT_DIR = os.path.join(REPO_DIR, "outputs")
 SPLIT_DIR = os.path.join(OUTPUT_DIR, "split")
 
 
@@ -72,14 +73,10 @@ def build_config(experiment, overrides=None, use_tuned=True):
     overrides.setdefault("checkpoint_dir", os.path.join(OUTPUT_DIR, "_checkpoints"))
     # RecBole also reads `--key=value` from sys.argv with the highest priority, which would
     # clash with our own CLI flags, so hide the command line while the config is built.
-    files = config_files(experiment, use_tuned)
-    with open(files[1]) as f:
-        model_name = yaml.safe_load(f)["model"]
-    # Models from models.py are passed as classes; RecBole's own models by name.
-    model = PROJECT_MODELS.get(model_name, model_name)
+    # The model name comes from the `model:` key of configs/models/<experiment>.yaml.
     argv, sys.argv = sys.argv, sys.argv[:1]
     try:
-        return Config(model=model, config_file_list=files, config_dict=overrides)
+        return Config(config_file_list=config_files(experiment, use_tuned), config_dict=overrides)
     finally:
         sys.argv = argv
 

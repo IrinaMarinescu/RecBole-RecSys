@@ -16,8 +16,8 @@ import os
 import pandas as pd
 import yaml
 
-from common import CONFIG_DIR, OUTPUT_DIR, load_split
-from mixed_hybrid import (
+from recbole.utils.experiment import CONFIG_DIR, OUTPUT_DIR, load_split
+from recbole.model.general_recommender.mixed_hybrid import (
     PRIMARY_METRIC,
     evaluate_recommendations,
     load_sources,

@@ -1,7 +1,8 @@
-"""Models defined in this project (outside RecBole).
-
-To use one, set `model: <ClassName>` in configs/models/<experiment>.yaml and add the class to
-PROJECT_MODELS below.
+r"""
+TrainPop
+################################################
+Most-popular baseline that counts popularity directly from the training interactions.
+Added for this project as a corrected replacement for :class:`~recbole.model.general_recommender.pop.Pop`.
 """
 
 import numpy as np
@@ -41,6 +42,3 @@ class TrainPop(GeneralRecommender):
     def full_sort_predict(self, interaction):
         n_users = interaction[self.USER_ID].shape[0]
         return (self.item_cnt / self.item_cnt.max()).repeat(n_users)
-
-
-PROJECT_MODELS = {cls.__name__: cls for cls in [TrainPop]}
