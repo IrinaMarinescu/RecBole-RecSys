@@ -2,6 +2,7 @@ load_col:
   inter: [user_id, item_id, rating]
   item: [item_id, movie_title, class]
 content: [movie_title, class]
+normalize_all: False         # keep ratings on the 1-5 scale (pos_rating_threshold, weighted_avg and score_mapping rely on it)
 max_seq_length: 64
 score_mapping: True
 eval_args:

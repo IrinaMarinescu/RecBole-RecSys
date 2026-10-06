@@ -631,6 +631,7 @@ class ContentBasedRecommender(AbstractRecommender):
 
         self.max_seq_length = config['max_seq_length']
         self.pooling_strategy = config['pooling_strategy']
+        self.center_embeddings = config['center_embeddings']
         self.batch_size = config['batch_size']
 
         self.aggregation_method = config['aggregation_method']

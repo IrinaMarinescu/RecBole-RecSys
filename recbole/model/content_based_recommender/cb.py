@@ -38,7 +38,15 @@ class CB(ContentBasedRecommender):
         """prepares the content according to the config option"""
         texts = [""]  # Index 0 is the padding item
         item_feat = dataset.item_feat
-        fields = [f for f in self.content_fields if item_feat is not None and f in item_feat]
+        loaded = [] if item_feat is None else list(item_feat.columns)
+        missing = [f for f in self.content_fields if f not in loaded]
+        if missing:
+            # otherwise every item gets an empty text and the same embedding, so all scores tie
+            raise ValueError(
+                f"Content fields {missing} are not loaded (loaded item fields: {loaded}). "
+                f"Check `content` and add them to `load_col: item: [...]` in the config."
+            )
+        fields = self.content_fields
 
         for item_idx in range(1, self.n_items):
             item_text_parts = []
@@ -112,6 +120,9 @@ class CB(ContentBasedRecommender):
             torch.cuda.empty_cache()
 
         item_embeddings = torch.cat(embeddings, dim=0).to(self.device)
+        if self.center_embeddings:
+            # BERT embeddings share one dominant direction; removing it keeps what is specific to each item
+            item_embeddings[1:] -= item_embeddings[1:].mean(dim=0)
         item_embeddings[0] = 0 #padding
         return item_embeddings
 

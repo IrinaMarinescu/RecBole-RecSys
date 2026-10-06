@@ -1,12 +1,13 @@
 bert_model: 'distilbert-base-uncased'         # which bert model to use
-content: ['title', 'category']                # which metadata attributes to use; options: ['title', 'category'], ['description'], ['title', 'category', 'description']
+content: ['movie_title', 'class']             # which item fields to use (must also be loaded via load_col: item); ml-100k has: movie_title, release_year, class
 max_seq_length: 512                           # token truncation limit
 pooling_strategy: 'cls'                       # methods for deriving the embeddings; options: 'cls', 'mean', 'max'
+center_embeddings: True                       # subtract the mean item embedding, removing the direction BERT gives every text (otherwise all user profiles end up nearly identical)
 batch_size: 32
-aggregation_method: 'avg'                     # strategy for creating the user profile vector; options: 'avg', 'weighted_avg', 'avg_pos'
+aggregation_method: 'avg_pos'                     # strategy for creating the user profile vector; options: 'avg', 'weighted_avg', 'avg_pos'
 pos_rating_threshold: 3.0                     # threshold for positive ratings
 cold_start_strategy: 'zero'                   # backup mechanism for users with no interactions in the training set; options: 'zero', 'global_mean', 'popularity'
 similarity_metric: 'dot'                      # options: 'dot', 'cosine', 'euclidean'
 score_mapping: False                          # True for Rating, False for Ranking
 top_k: 10                                     # size of recommendation list
-filter_interacted: False                      # whether to filter out items that have been interacted by the user
+filter_interacted: True                      # whether to filter out items that have been interacted by the user
