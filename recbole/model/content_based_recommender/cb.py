@@ -152,6 +152,8 @@ class CB(ContentBasedRecommender):
         user_ids = self._to_numpy(inter_feat[self.USER_ID])
         item_ids = self._to_numpy(inter_feat[self.ITEM_ID])
         ratings = self._to_numpy(inter_feat[self.RATING]) if self.RATING in inter_feat else None
+        if ratings is not None:
+            ratings = self._to_original_rating_scale(ratings, dataset)
 
         embed_dim = self.item_embeddings.shape[1]
         cold_start_embedding = self._cold_start_embedding(item_ids)
@@ -262,6 +264,13 @@ class CB(ContentBasedRecommender):
             return self.rating_min + (scores - self.sim_min) * scale
         # every prediction identical -> fall back to the midpoint of the rating scale
         return torch.full_like(scores, (self.rating_min + self.rating_max) / 2)
+
+    def _to_original_rating_scale(self, ratings, dataset):
+        norm_range = getattr(dataset, "field2norm_range", {}).get(self.RATING)
+        if norm_range is None:
+            return ratings
+        mn, mx = norm_range
+        return ratings * (mx - mn) + mn
 
     @staticmethod
     def _to_numpy(values):
