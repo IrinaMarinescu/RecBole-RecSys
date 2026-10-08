@@ -327,15 +327,15 @@ class Config(object):
     def _set_default_parameters(self):
         self.final_config_dict["dataset"] = self.dataset
         self.final_config_dict["model"] = self.model
-        if self.dataset == "ml-100k":
+        user_data_path = os.path.join(self.final_config_dict["data_path"], self.dataset)
+        # fall back to the bundled ml-100k only when there is no local copy (e.g. dataset/ml-100k with descriptions)
+        if self.dataset == "ml-100k" and not os.path.isdir(user_data_path):
             current_path = os.path.dirname(os.path.realpath(__file__))
             self.final_config_dict["data_path"] = os.path.join(
                 current_path, "../dataset_example/" + self.dataset
             )
         else:
-            self.final_config_dict["data_path"] = os.path.join(
-                self.final_config_dict["data_path"], self.dataset
-            )
+            self.final_config_dict["data_path"] = user_data_path
 
         if hasattr(self.model_class, "input_type"):
             self.final_config_dict["MODEL_INPUT_TYPE"] = self.model_class.input_type

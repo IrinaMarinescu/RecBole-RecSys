@@ -11,5 +11,6 @@ eval_args:
   group_by: ~
   mode: labeled
 threshold: ~
+LABEL_FIELD: rating          # with no threshold RecBole creates no `label` column, so evaluate against the raw rating
 metrics: [RMSE, MAE]
 valid_metric: RMSE

@@ -628,6 +628,8 @@ class ContentBasedRecommender(AbstractRecommender):
 
         self.bert_model = config['bert_model']
         self.content = config['content']
+        self.separate_content = config['separate_content'] or []
+        self.separate_content_weight = config['separate_content_weight']
 
         self.max_seq_length = config['max_seq_length']
         self.pooling_strategy = config['pooling_strategy']

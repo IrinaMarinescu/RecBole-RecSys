@@ -1,13 +1,15 @@
-bert_model: 'distilbert-base-uncased'         # which bert model to use
+bert_model: 'sentence-transformers/all-MiniLM-L6-v2'  # which bert model to use; a sentence-embedding model (trained with mean pooling) gives far better text similarities than plain 'distilbert-base-uncased'
 content: ['movie_title', 'class']             # which item fields to use (must also be loaded via load_col: item); ml-100k has: movie_title, release_year, class
-max_seq_length: 512                           # token truncation limit
-pooling_strategy: 'cls'                       # methods for deriving the embeddings; options: 'cls', 'mean', 'max'
+separate_content: []                          # fields embedded on their own and mixed in afterwards, e.g. ['description'], so long texts cannot drown out `content` (must also be loaded via load_col: item)
+separate_content_weight: 0.3                  # weight of the separate_content embedding; `content` gets 1 - this
+max_seq_length: 256                           # token truncation limit (all-MiniLM-L6-v2 was trained on at most 256 tokens)
+pooling_strategy: 'mean'                      # methods for deriving the embeddings; options: 'cls', 'mean', 'max'
 center_embeddings: True                       # subtract the mean item embedding, removing the direction BERT gives every text (otherwise all user profiles end up nearly identical)
 batch_size: 32
 aggregation_method: 'avg_pos'                     # strategy for creating the user profile vector; options: 'avg', 'weighted_avg', 'avg_pos'
 pos_rating_threshold: 3.0                     # threshold for positive ratings
 cold_start_strategy: 'zero'                   # backup mechanism for users with no interactions in the training set; options: 'zero', 'global_mean', 'popularity'
-similarity_metric: 'dot'                      # options: 'dot', 'cosine', 'euclidean'
+similarity_metric: 'cosine'                   # options: 'dot', 'cosine', 'euclidean'
 score_mapping: False                          # True for Rating, False for Ranking
 top_k: 10                                     # size of recommendation list
 filter_interacted: True                      # whether to filter out items that have been interacted by the user

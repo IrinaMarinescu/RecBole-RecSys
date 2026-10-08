@@ -1,9 +1,10 @@
 load_col:
   inter: [user_id, item_id, rating]
-  item: [item_id, movie_title, class]
+  item: [item_id, movie_title, class, description]
 content: [movie_title, class]
+separate_content: [description]
 normalize_all: False         # keep ratings on the 1-5 scale (pos_rating_threshold, weighted_avg and score_mapping rely on it)
-max_seq_length: 64
+max_seq_length: 256
 eval_args:
   split: {RS: [0.8, 0.1, 0.1]}
   order: RO
