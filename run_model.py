@@ -1,6 +1,6 @@
-"""Train one or more experiments and export their split, scores and top-N lists.
+"""Train one or more experiments and export their split, scores and top-N lists to outputs/.
 
-Examples:
+Experiments are the files in configs/models/. Examples:
     python run_model.py UserKNN ItemKNN BPR
     python run_model.py all
     python run_model.py UserKNN --set k 50 --set shrink 10      # quick manual override
@@ -11,7 +11,7 @@ import argparse
 
 import yaml
 
-from common import experiment_names, export, train
+from recbole.utils.experiment import experiment_names, export, train
 
 
 def main():

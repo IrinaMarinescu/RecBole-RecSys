@@ -25,7 +25,7 @@ Recommendations = Mapping[str, pd.DataFrame]
 
 def load_sources(model_names: Sequence[str], stage: str) -> Dict[str, pd.DataFrame]:
     """Top-N lists of every model for stage 'valid' or 'test'."""
-    from common import load_recs  # lazy: the mixing logic and its tests do not need RecBole
+    from recbole.utils.experiment import load_recs  # lazy: the mixing logic and its tests do not load any data
 
     return {name: load_recs(name, stage) for name in model_names}
 

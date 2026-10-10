@@ -13,8 +13,8 @@ import os
 
 import yaml
 
-from common import CONFIG_DIR, OUTPUT_DIR, load_split
-from mixed_hybrid import (
+from recbole.utils.experiment import CONFIG_DIR, OUTPUT_DIR, load_split
+from recbole.model.general_recommender.mixed_hybrid import (
     evaluate_recommendations,
     format_metrics,
     load_sources,

@@ -13,3 +13,9 @@ saved/
 docs/build/
 wandb/*
 /ray_log*
+
+# Project: generated results (regenerate with `python run_model.py all`) and local environments
+/outputs/
+/log/
+__pycache__/
+.venv/
