@@ -1,4 +1,5 @@
 # Naive baseline: rank items by number of training interactions.
-# Uses TrainPop (models.py) instead of RecBole's Pop, whose batch-wise counting is incorrect.
+# Uses TrainPop (recbole/model/general_recommender/trainpop.py) instead of RecBole's Pop,
+# whose batch-wise counting is incorrect.
 model: TrainPop
 train_neg_sample_args: ~        # TrainPop does not train, so skip negative sampling

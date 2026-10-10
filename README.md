@@ -1,3 +1,217 @@
+# DSAIT4335 Recommender Systems: Final Project
+
+This repository is a fork of [RecBole](https://github.com/RUCAIBox/RecBole), extended for the course
+project on MovieLens 100K. RecBole's original documentation follows [below](#about-recbole).
+
+## Setup
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+If `pip` fails on `ray` (the pinned `ray<=2.6.3` has no build for recent Python versions), install
+everything else instead. `run_model.py` and `run_tuning.py` do not need ray, but `run_recbole.py`
+and `run_hybrid.py` do, because RecBole's `quick_start` imports it:
+
+```bash
+grep -v '^ray' requirements.txt | pip install -r /dev/stdin
+```
+
+All scripts are run from the repository root.
+
+## Individual models (Task 1.1 / 1.2)
+
+`run_model.py` trains the baselines, neighbourhood models and matrix factorisation, and writes every
+model's results to `outputs/` in the same format. Hybrid, evaluation and reranking code can then work
+from these files without re-running RecBole.
+
+```bash
+python run_model.py all                    # train + export every model in configs/models/
+python run_model.py UserKNN ItemKNN BPR    # or just some of them
+python run_model.py UserKNN --set k 20     # one-off override, e.g. for a quick experiment
+python run_model.py BPR --no-tuned         # use the untuned defaults
+
+python run_tuning.py UserKNN ItemKNN BPR   # grid search on the validation set (see below)
+```
+
+Rough CPU run times: KNN models and Pop take a few seconds each, and BPR takes about 10 s.
+Tuning takes 20 s (UserKNN), about 1 min (ItemKNN) and about 5 min (BPR).
+
+### Models
+
+| Experiment    | RecBole model | What it is |
+|---------------|---------------|------------|
+| `Random`      | Random        | naive baseline |
+| `Pop`         | TrainPop      | naive baseline: most-interacted items in the training set |
+| `UserKNN`     | ItemKNN, `knn_method: user` | user-based neighbourhood CF, cosine similarity |
+| `ItemKNN`     | ItemKNN, `knn_method: item` | item-based neighbourhood CF, cosine similarity |
+| `AsymUserKNN` | AsymKNN, `knn_method: user` | user-based CF with asymmetric cosine |
+| `AsymItemKNN` | AsymKNN, `knn_method: item` | item-based CF with asymmetric cosine |
+| `BPR`         | BPR           | matrix factorisation trained with a pairwise ranking loss |
+
+To add a model, drop a YAML into `configs/models/` (it needs at least `model: <RecBole model name>`)
+and optionally a grid in `configs/hyper/`.
+
+### Configuration
+
+Configs are applied in this order; later files override earlier ones:
+
+1. `configs/base.yaml`: shared by every model. It sets the dataset, a random 80/10/10 split per user
+   (seed 2020), full ranking evaluation and NDCG@10 as the validation metric.
+   **Don't change this after models have been run**, or they will no longer share a split.
+   `run_model.py` warns you if that happens.
+2. `configs/models/<experiment>.yaml`: the model and its default hyperparameters.
+3. `configs/tuned/<experiment>.yaml`: written by `run_tuning.py`, and used automatically when present.
+
+Only ratings of **3 stars or more** are kept, and each one counts as a positive interaction
+(`val_interval` in `configs/base.yaml`). 1- and 2-star ratings (17% of ML-100K) are dropped before
+splitting, so they appear in no split and are never treated as hits.
+
+### Tuning
+
+`run_tuning.py <experiment>` tries every combination in `configs/hyper/<experiment>.yaml`, trains on
+*train*, and selects by NDCG@10 on *valid*. The test set is never used for selection; test scores are
+only logged in the CSV for reference. It writes:
+
+- `outputs/tuning/<experiment>.csv`: every combination tried, best first
+- `configs/tuned/<experiment>.yaml`: the best parameters
+
+### Outputs (`outputs/`, not committed)
+
+| File | Contents |
+|------|----------|
+| `split/{train,valid,test}.tsv` | `user_id, item_id, rating, timestamp`, with original MovieLens ids. Identical for all models. |
+| `<experiment>/scores.npz` | `scores` [943 users x 1574 items; items with only 1-2 star ratings are dropped], `user_ids`, `item_ids`. Raw model scores for **every** pair; seen items are not masked. |
+| `<experiment>/recs_valid.tsv` | top-100 per user, `user_id, item_id, rank, score`, with training items removed |
+| `<experiment>/recs_test.tsv` | top-100 per user, with training **and** validation items removed |
+| `<experiment>/metrics.json` | RecBole's own valid/test metrics, **as a sanity check only**. The project asks us to report our own metrics. |
+| `<experiment>/config.yaml` | the hyperparameters actually used |
+
+Models are trained on *train* only. Use `recs_valid` / validation scores to fit anything
+(e.g. hybrid weights), and `recs_test` for final evaluation.
+
+### Loading outputs in your own code
+
+```python
+from recbole.utils.experiment import load_split, load_scores, load_recs
+
+train, valid, test = load_split()
+S_user, user_ids, item_ids = load_scores("UserKNN")   # rows/cols are identical across models,
+S_bpr, _, _ = load_scores("BPR")                      # so matrices can be combined directly
+recs = load_recs("ItemKNN", "test")                   # DataFrame: user_id, item_id, rank, score
+```
+
+`recbole.utils.experiment` also exposes `CONFIG_DIR`, `OUTPUT_DIR` and `REPO_DIR`.
+
+Scores are on different scales for different models (KNN: sums of similarities; BPR: dot
+products; Pop: count / max count), so normalise them (e.g. per-user min-max or z-score) before
+combining them in a *weighted / regression* hybrid.
+
+### Changes to RecBole for this part
+
+- **`Pop` uses our `TrainPop`** (`recbole/model/general_recommender/trainpop.py`), not RecBole's `Pop`.
+  RecBole's Pop counts an item at most once per training batch (`cnt[item] = cnt[item] + 1` ignores
+  repeats), and it also counts randomly sampled negatives, so its "popularity" took only about 50
+  distinct values. TrainPop reads the true counts from the training interaction matrix and scores
+  items the same way (count / max count). RecBole's `pop.py` is unchanged.
+- **NumPy 2 support:** `recbole/config/configurator.py` referred to aliases removed in NumPy 2.0
+  (`np.float_`, `np.complex_`, `np.unicode_`), so importing RecBole crashed.
+- `recbole/utils/experiment.py` restores the best checkpoint with `weights_only=False`, because
+  `torch.load`'s default changed in PyTorch 2.6.
+
+## Mixed Hybrid (list mixing)
+
+The Mixed Hybrid is a **separate** approach from the Logistic Regression weighted hybrid.
+It does **not** combine raw scores. It interleaves already-ranked recommendation lists,
+deduplicates per user, and keeps the first `K` unique items.
+
+Preferred sources (different paradigms):
+
+| Source | Paradigm |
+|--------|----------|
+| `ItemKNN` | neighbourhood collaborative filtering |
+| `BPR` | matrix factorisation / personalized ranking |
+| `ContentBased` | content similarity (`CB` model, run through `run_model.py`) |
+
+### Strategy
+
+Two mixers are implemented in `recbole/model/general_recommender/mixed_hybrid.py`:
+
+1. **RoundRobin** — take rank 1 from each model, then rank 2, … skipping duplicates.
+2. **Quota round-robin** — in each round take up to `quotas[model]` unseen items from that
+   model's list, then repeat until `top_k` unique items are filled.
+
+Example quotas `ItemKNN=2 BPR=1 ContentBased=1`:
+
+```text
+Round 1: ItemKNN, ItemKNN, BPR, ContentBased
+Round 2: ItemKNN, ItemKNN, BPR, ContentBased
+...
+```
+
+Deduplication is **per user**. If one source runs out of candidates, the others continue.
+
+
+### Tune on validation, evaluate once on test
+
+Primary selection metric: **NDCG@10** (same as `configs/base.yaml`).
+
+```bash
+python run_model.py ItemKNN BPR ContentBased   # prerequisite: the source lists
+python tune_mixed_hybrid.py
+python run_mixed_hybrid.py
+```
+
+`tune_mixed_hybrid.py` never reads the test set for selection. It writes:
+
+- `configs/mixed_hybrid_best.yaml` — frozen best quotas
+- `outputs/MixedHybrid/tuning_valid.csv` — all validation configurations
+- `outputs/MixedHybrid/recs_valid.tsv`
+
+`run_mixed_hybrid.py` loads that frozen config, builds test recommendations, reports standalone
+vs Mixed Hybrid metrics on the **same** test split, and writes:
+
+- `outputs/MixedHybrid/recs_test.tsv` (`user_id, item_id, rank, source, score`)
+- `outputs/MixedHybrid/test_metrics.json`
+
+### Results (seed 2020, ML-100K, ratings >= 3)
+
+Validation (selection by NDCG@10, full table in `outputs/MixedHybrid/tuning_valid.csv`):
+
+| Configuration | Recall@10 | MRR@10 | NDCG@10 |
+|---|---|---|---|
+| RoundRobin | 0.2030 | 0.3715 | 0.2076 |
+| ItemKNN=5 BPR=3 CB=2 | 0.2179 | 0.3803 | 0.2223 |
+| **ItemKNN=4 BPR=4 CB=2** | 0.2161 | 0.3798 | **0.2226** |
+| ItemKNN=3 BPR=5 CB=2 | 0.2156 | 0.3815 | 0.2221 |
+| ItemKNN=4 BPR=3 CB=3 | 0.2017 | 0.3769 | 0.2133 |
+| ItemKNN=2 BPR=3 CB=5 | 0.1677 | 0.3694 | 0.1909 |
+
+Test (frozen config, evaluated once):
+
+| Model | Recall@10 | MRR@10 | NDCG@10 | Hit@10 | Precision@10 |
+|---|---|---|---|---|---|
+| ItemKNN | 0.2266 | 0.3966 | 0.2389 | 0.6903 | 0.1524 |
+| BPR | 0.2434 | 0.4277 | 0.2578 | 0.7190 | 0.1628 |
+| ContentBased | 0.0280 | 0.0651 | 0.0291 | 0.1866 | 0.0223 |
+| Mixed Hybrid (4:4:2) | 0.2168 | 0.3966 | 0.2356 | 0.6797 | 0.1468 |
+
+The Mixed Hybrid does not beat BPR. On validation, every extra slot given to ContentBased lowers
+NDCG@10, because CB alone is roughly 8x weaker than the collaborative models, so the slots it gets
+mostly replace hits from ItemKNN/BPR. The best mix gives CB the smallest share in the grid.
+
+### Tests
+
+```bash
+python -m unittest discover -s tests/hybrid -v
+```
+
+---
+
+# About RecBole
+
 ![RecBole Logo](asset/logo.png)
 
 --------------------------------------------------------------------------------

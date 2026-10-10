@@ -1,13 +1,13 @@
 """Grid-search the hyperparameters of an experiment on the VALIDATION set.
 
-The grid is read from hyper/<experiment>.yaml (one list of values per parameter).
+The grid is read from configs/hyper/<experiment>.yaml (one list of values per parameter).
 Results of every run go to outputs/tuning/<experiment>.csv, and the best parameters
 (by the valid_metric in configs/base.yaml, NDCG@10) are written to configs/tuned/<experiment>.yaml,
 which run_model.py picks up automatically.
 
 Examples:
-    python tune.py UserKNN
-    python tune.py ItemKNN BPR
+    python run_tuning.py UserKNN
+    python run_tuning.py ItemKNN BPR
 """
 
 import argparse
@@ -18,11 +18,11 @@ import os
 import pandas as pd
 import yaml
 
-from common import CONFIG_DIR, OUTPUT_DIR, PROJECT_DIR, train
+from recbole.utils.experiment import CONFIG_DIR, HYPER_DIR, OUTPUT_DIR, train
 
 
 def tune(experiment):
-    with open(os.path.join(PROJECT_DIR, "hyper", f"{experiment}.yaml")) as f:
+    with open(os.path.join(HYPER_DIR, f"{experiment}.yaml")) as f:
         grid = yaml.safe_load(f)
     names = list(grid)
     combos = list(itertools.product(*(grid[n] for n in names)))
@@ -43,7 +43,7 @@ def tune(experiment):
 
     best = {n: table[n].iloc[0].item() for n in names}  # per column, so ints stay ints
     with open(os.path.join(CONFIG_DIR, "tuned", f"{experiment}.yaml"), "w") as f:
-        f.write(f"# Best by valid {metric} = {table.iloc[0][f'valid_{metric}']:.4f} (written by tune.py)\n")
+        f.write(f"# Best by valid {metric} = {table.iloc[0][f'valid_{metric}']:.4f} (written by run_tuning.py)\n")
         yaml.safe_dump(best, f, sort_keys=False)
     print(f"[{experiment}] best: {best}")
 

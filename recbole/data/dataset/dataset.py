@@ -666,6 +666,7 @@ class Dataset(torch.utils.data.Dataset):
         Note:
             Only float-like fields can be normalized.
         """
+        self.field2norm_range = {}
         if (
             self.config["normalize_field"] is not None
             and self.config["normalize_all"] is True
@@ -696,6 +697,7 @@ class Dataset(torch.utils.data.Dataset):
 
                 def norm(arr):
                     mx, mn = max(arr), min(arr)
+                    self.field2norm_range[field] = (float(mn), float(mx))
                     if mx == mn:
                         self.logger.warning(
                             f"All the same value in [{field}] from [{feat}_feat]."

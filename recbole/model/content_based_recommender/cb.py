@@ -18,7 +18,12 @@ class CB(ContentBasedRecommender):
 
         # Extract content based on the fields selected in config
         self.content_fields = self.content
-        self.item_texts = self._extract_item_content(dataset)
+        self._check_fields_loaded(dataset, self.content_fields + self.separate_content)
+        self.item_texts = self._extract_item_content(dataset, self.content_fields)
+        # long fields (e.g. description) get their own embedding so they cannot drown out the short ones
+        self.separate_texts = (
+            self._extract_item_content(dataset, self.separate_content) if self.separate_content else None
+        )
 
         # build item embeddings
         self.register_buffer("item_embeddings", self._build_item_embeddings())
@@ -34,11 +39,22 @@ class CB(ContentBasedRecommender):
         if self.score_mapping:
             self._init_score_mapping(dataset)
 
-    def _extract_item_content(self, dataset):
-        """prepares the content according to the config option"""
+    @staticmethod
+    def _check_fields_loaded(dataset, fields):
+        item_feat = dataset.item_feat
+        loaded = [] if item_feat is None else list(item_feat.columns)
+        missing = [f for f in fields if f not in loaded]
+        if missing:
+            # otherwise every item gets an empty text and the same embedding, so all scores tie
+            raise ValueError(
+                f"Content fields {missing} are not loaded (loaded item fields: {loaded}). "
+                f"Check `content` / `separate_content` and add them to `load_col: item: [...]` in the config."
+            )
+
+    def _extract_item_content(self, dataset, fields):
+        """joins the given item fields into one text per item"""
         texts = [""]  # Index 0 is the padding item
         item_feat = dataset.item_feat
-        fields = [f for f in self.content_fields if item_feat is not None and f in item_feat]
 
         for item_idx in range(1, self.n_items):
             item_text_parts = []
@@ -65,17 +81,35 @@ class CB(ContentBasedRecommender):
         return texts
 
     def _build_item_embeddings(self):
-        """creates fixed item embedding vectors using BERT, according to the configured pooling strategy"""
+        """creates fixed item embedding vectors using BERT; separate_content fields are embedded on their own
+        and mixed in with weight separate_content_weight"""
         tokenizer = AutoTokenizer.from_pretrained(self.bert_model)
         model = AutoModel.from_pretrained(self.bert_model).to(self.device)
         model.eval()
 
+        item_embeddings = self._embed_texts(self.item_texts, tokenizer, model)
+        if self.separate_texts is not None:
+            separate_embeddings = self._embed_texts(self.separate_texts, tokenizer, model)
+            # unit length first, otherwise the weight would also depend on how large each group's vectors are
+            w = self.separate_content_weight
+            item_embeddings = (1 - w) * F.normalize(item_embeddings, dim=-1) + w * F.normalize(separate_embeddings, dim=-1)
+
+        # Free transformer
+        del model, tokenizer
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
+        item_embeddings[0] = 0 #padding
+        return item_embeddings
+
+    def _embed_texts(self, texts, tokenizer, model):
+        """embeds one text per item, according to the configured pooling strategy"""
         embeddings = []
         pooling_strategy = str(self.pooling_strategy or "cls").lower()
 
         with torch.no_grad():
-            for i in range(0, len(self.item_texts), self.batch_size):
-                batch_texts = self.item_texts[i: i + self.batch_size]
+            for i in range(0, len(texts), self.batch_size):
+                batch_texts = texts[i: i + self.batch_size]
                 inputs = tokenizer(
                     batch_texts,
                     padding=True,
@@ -106,13 +140,10 @@ class CB(ContentBasedRecommender):
 
                 embeddings.append(batch_embeds.cpu())
 
-        # Free transformer
-        del model, tokenizer
-        if torch.cuda.is_available():
-            torch.cuda.empty_cache()
-
         item_embeddings = torch.cat(embeddings, dim=0).to(self.device)
-        item_embeddings[0] = 0 #padding
+        if self.center_embeddings:
+            # BERT embeddings share one dominant direction; removing it keeps what is specific to each item
+            item_embeddings[1:] -= item_embeddings[1:].mean(dim=0)
         return item_embeddings
 
     def _build_user_embeddings(self, dataset):
@@ -121,6 +152,8 @@ class CB(ContentBasedRecommender):
         user_ids = self._to_numpy(inter_feat[self.USER_ID])
         item_ids = self._to_numpy(inter_feat[self.ITEM_ID])
         ratings = self._to_numpy(inter_feat[self.RATING]) if self.RATING in inter_feat else None
+        if ratings is not None:
+            ratings = self._to_original_rating_scale(ratings, dataset)
 
         embed_dim = self.item_embeddings.shape[1]
         cold_start_embedding = self._cold_start_embedding(item_ids)
@@ -231,6 +264,13 @@ class CB(ContentBasedRecommender):
             return self.rating_min + (scores - self.sim_min) * scale
         # every prediction identical -> fall back to the midpoint of the rating scale
         return torch.full_like(scores, (self.rating_min + self.rating_max) / 2)
+
+    def _to_original_rating_scale(self, ratings, dataset):
+        norm_range = getattr(dataset, "field2norm_range", {}).get(self.RATING)
+        if norm_range is None:
+            return ratings
+        mn, mx = norm_range
+        return ratings * (mx - mn) + mn
 
     @staticmethod
     def _to_numpy(values):
