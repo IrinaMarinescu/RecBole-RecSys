@@ -26,6 +26,7 @@ def main():
     args = parser.parse_args()
 
     source_models = []
+    source_evals = []  # (config, test_data) of each source's own checkpoint
     config, dataset, train_data, valid_data, test_data = None, None, None, None, None
 
     # Load pre-trained source models and identically seeded dataset splits
@@ -33,6 +34,7 @@ def main():
         print(f"Loading {file_path}...")
         cfg, model, ds, tr_data, val_data, te_data = load_data_and_model(file_path)
         source_models.append(model)
+        source_evals.append((cfg, te_data))
 
         if config is None:
             config = cfg
@@ -42,8 +44,10 @@ def main():
             test_data = te_data
 
     print("\n--- Source Model Standalone Test Metrics ---")
-    for model in source_models:
-        test_result = evaluate(config, model, test_data)
+    # Each source on its own test data: CB's dataset also holds the items without interactions,
+    # so its scores have more columns than the first checkpoint's test data expects
+    for model, (cfg, te_data) in zip(source_models, source_evals):
+        test_result = evaluate(cfg, model, te_data)
         print(f"[{model.__class__.__name__}] Test Metrics: {test_result}")
 
     # Hyperparameters of the target model. Set them to the values in your target
