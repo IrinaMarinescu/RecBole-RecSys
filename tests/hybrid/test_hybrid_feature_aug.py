@@ -25,7 +25,7 @@ from recbole.trainer import Trainer
 from recbole.utils import get_model, init_seed
 
 current_path = os.path.dirname(os.path.realpath(__file__))
-config_file_list = [os.path.join(current_path, "test_model.yaml")]
+config_file_list = [os.path.join(current_path, "..", "model", "test_model.yaml")]
 
 USER_ID = "user_id"
 ITEM_ID = "item_id"
