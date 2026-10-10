@@ -1,0 +1,4 @@
+# Embarrassingly Shallow Autoencoder: a closed-form item-item linear model.
+# B = argmin ||X - XB||^2 + reg_weight * ||B||^2  s.t. diag(B) = 0;  score(u, i) = (X B)[u, i]
+model: EASE
+reg_weight: 250.0               # L2 regularisation on the item-item weights

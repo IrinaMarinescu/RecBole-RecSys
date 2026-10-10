@@ -1,0 +1,2 @@
+# Best by valid ndcg@10 = 0.2447 (written by run_tuning.py)
+reg_weight: 500.0
