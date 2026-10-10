@@ -1,7 +1,7 @@
 import argparse
 from recbole.quick_start import load_data_and_model
 from recbole.trainer import Trainer
-from recbole.model.sequential_recommender.hybrid_feature_aug import HybridFeatureAugmentation
+from recbole.model.general_recommender.hybrid_feature_aug import HybridFeatureAugmentation
 
 import numpy as np
 np.float = float
