@@ -200,6 +200,21 @@ class TestCandidateRanking(unittest.TestCase):
             tiny_batches._rank_candidates(tiny_batches.source_models[0], 3),
         )
 
+    def test_extra_source_items_are_dropped(self):
+        # like CB, which also knows items that have no interactions; the extra ones come last
+        extra = np.full((N_USERS, 3), 100.0, dtype=np.float32)
+        wide = FullSortSource(np.hstack([SCORES_A, extra]))
+        hybrid = make_hybrid([FullSortSource(SCORES_A), wide])
+        np.testing.assert_array_equal(
+            hybrid._rank_candidates(hybrid.source_models[0], 3),
+            hybrid._rank_candidates(hybrid.source_models[1], 3),
+        )
+
+    def test_source_with_fewer_items_raises(self):
+        hybrid = make_hybrid([FullSortSource(SCORES_A[:, :-1])])
+        with self.assertRaises(ValueError):
+            hybrid._rank_candidates(hybrid.source_models[0], 3)
+
 
 class TestAugmentation(unittest.TestCase):
     def test_pseudo_matrix_is_union_of_sources_with_weight(self):

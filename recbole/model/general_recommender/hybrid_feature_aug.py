@@ -136,7 +136,17 @@ class HybridFeatureAugmentation(nn.Module):
                                         self.ITEM_ID: all_i[s:s + 2 ** 18]}).to(self.device)
                     chunks.append(model.predict(pair))
                 scores = torch.cat(chunks)
-        return scores.reshape(len(users), self.n_items).float().cpu().numpy()
+        scores = scores.reshape(len(users), -1)
+        # A source can know more items than the hybrid's dataset: CB also loads ml-100k.item, which
+        # lists movies that have no (>= 3 star) interactions. RecBole numbers items from the
+        # interactions first, so the first n_items ids are shared and the extra ones come last.
+        if scores.shape[1] < self.n_items:
+            raise ValueError(
+                f"{model.__class__.__name__} scores {scores.shape[1]} items, but the hybrid's dataset has "
+                f"{self.n_items}. Pass the model with the most items (e.g. CB) after the others in "
+                f"--model_files, so the hybrid takes its dataset from a model without the extra items."
+            )
+        return scores[:, :self.n_items].float().cpu().numpy()
 
     def _rank_candidates(self, model, n):
         """Top-n unseen items per user for one source model, best first (-1 = none)."""
