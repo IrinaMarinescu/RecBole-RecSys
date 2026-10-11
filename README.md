@@ -50,6 +50,10 @@ Tuning takes 20 s (UserKNN), about 1 min (ItemKNN) and about 5 min (BPR).
 | `AsymUserKNN` | AsymKNN, `knn_method: user` | user-based CF with asymmetric cosine |
 | `AsymItemKNN` | AsymKNN, `knn_method: item` | item-based CF with asymmetric cosine |
 | `BPR`         | BPR           | matrix factorisation trained with a pairwise ranking loss |
+| `SLIMElastic` | SLIMElastic   | sparse item-item weights learned by ElasticNet regression (closed form, no epochs) |
+| `RecVAE`      | RecVAE        | variational autoencoder over each user's interaction vector |
+| `LightGCN`    | LightGCN      | embeddings smoothed over the user-item graph, BPR loss |
+| `SimpleX`     | SimpleX       | user = own embedding + mean of history; cosine contrastive loss with 50 negatives |
 
 To add a model, drop a YAML into `configs/models/` (it needs at least `model: <RecBole model name>`)
 and optionally a grid in `configs/hyper/`.
@@ -118,6 +122,9 @@ combining them in a *weighted / regression* hybrid.
   items the same way (count / max count). RecBole's `pop.py` is unchanged.
 - **NumPy 2 support:** `recbole/config/configurator.py` referred to aliases removed in NumPy 2.0
   (`np.float_`, `np.complex_`, `np.unicode_`), so importing RecBole crashed.
+- **LightGCN with recent SciPy:** `recbole/model/general_recommender/lightgcn.py` built its graph with
+  `dok_matrix._update`, which SciPy >= 1.15 removed. It now builds the identical matrix as COO.
+  NGCF, NCL, SpectralCF, GCMC, KGIN and MCCLK use the same call and are not fixed.
 - `recbole/utils/experiment.py` restores the best checkpoint with `weights_only=False`, because
   `torch.load`'s default changed in PyTorch 2.6.
 

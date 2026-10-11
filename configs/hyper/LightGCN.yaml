@@ -1,0 +1,4 @@
+# ~1.5 min per run -> 12 runs, about 15 minutes
+learning_rate: [0.001, 0.005]    # at 0.001 the default run only peaked at epoch 223
+n_layers: [1, 2, 3]              # how many hops of neighbours are propagated
+reg_weight: [0.00001, 0.0001]

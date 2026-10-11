@@ -1,0 +1,15 @@
+# RecVAE: variational autoencoder over each user's full interaction vector. The encoder maps the
+# user's history to a latent Gaussian; the decoder predicts a softmax over all items. Uses a
+# composite prior (standard normal + previous encoder) and alternates encoder/decoder updates.
+model: RecVAE
+hidden_dimension: 600
+latent_dimension: 200
+dropout_prob: 0.5
+beta: 0.2                       # weight of the KL term
+gamma: 0.005
+mixture_weights: [0.15, 0.75, 0.1]
+n_enc_epochs: 3
+n_dec_epochs: 1
+learning_rate: 0.001
+epochs: 300
+stopping_step: 10               # early stopping on valid NDCG@10

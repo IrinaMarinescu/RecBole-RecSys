@@ -1,0 +1,4 @@
+# ~1.5-2 min per run -> 12 runs, about 20 minutes
+margin: [0.5, 0.7, 0.9]          # negatives with cosine above this are penalised
+negative_weight: [10, 50]        # weight of the negative part of the loss
+gamma: [0.3, 0.7]                # share of the user's own embedding vs. the mean of its history
