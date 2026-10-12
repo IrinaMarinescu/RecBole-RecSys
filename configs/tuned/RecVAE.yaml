@@ -1,0 +1,4 @@
+# Best by valid ndcg@10 = 0.2500 (written by run_tuning.py)
+latent_dimension: 100
+gamma: 0.01
+dropout_prob: 0.5

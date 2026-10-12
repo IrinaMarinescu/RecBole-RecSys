@@ -1,0 +1,8 @@
+# SLIM: learns a sparse item-item weight matrix W by ElasticNet regression of each item's column
+# on all other items (closed-form training, no epochs). score(u, i) = sum_j r(u, j) * W[j, i].
+# L1 weight = alpha * l1_ratio, L2 weight = alpha * (1 - l1_ratio) / 2.
+model: SLIMElastic
+alpha: 0.2
+l1_ratio: 0.02
+positive_only: True             # non-negative item weights
+hide_item: True                 # an item may not predict itself

@@ -1,0 +1,4 @@
+# Best by valid ndcg@10 = 0.2368 (written by run_tuning.py)
+margin: 0.9
+negative_weight: 50
+gamma: 0.3

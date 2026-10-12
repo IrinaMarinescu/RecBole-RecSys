@@ -1,0 +1,4 @@
+# Best by valid ndcg@10 = 0.2376 (written by run_tuning.py)
+learning_rate: 0.005
+n_layers: 2
+reg_weight: 0.0001
