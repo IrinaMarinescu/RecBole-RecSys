@@ -21,11 +21,6 @@ import yaml
 from recbole.utils.experiment import CONFIG_DIR, HYPER_DIR, OUTPUT_DIR, train
 
 
-def _plain(value):
-    """numpy scalar -> Python value for YAML; strings and lists (e.g. layer sizes) are returned unchanged."""
-    return value.item() if hasattr(value, "item") else value
-
-
 def tune(experiment):
     with open(os.path.join(HYPER_DIR, f"{experiment}.yaml")) as f:
         grid = yaml.safe_load(f)
@@ -46,7 +41,7 @@ def tune(experiment):
     os.makedirs(os.path.join(OUTPUT_DIR, "tuning"), exist_ok=True)
     table.to_csv(os.path.join(OUTPUT_DIR, "tuning", f"{experiment}.csv"), index=False)
 
-    best = {n: _plain(table[n].iloc[0]) for n in names}  # per column, so ints stay ints
+    best = {n: getattr(v, "item", lambda: v)() for n in names for v in [table[n].iloc[0]]}  # numpy -> python, so ints stay ints
     with open(os.path.join(CONFIG_DIR, "tuned", f"{experiment}.yaml"), "w") as f:
         f.write(f"# Best by valid {metric} = {table.iloc[0][f'valid_{metric}']:.4f} (written by run_tuning.py)\n")
         yaml.safe_dump(best, f, sort_keys=False)
