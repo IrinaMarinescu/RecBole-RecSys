@@ -1,9 +1,14 @@
-# Content-based recommender (recbole/model/content_based_recommender/cb.py), unchanged.
-# Items are embedded from their title + genres with DistilBERT; a user is the average of
-# the embeddings of their training items; score(u, i) = <user embedding, item embedding>.
+# Content-based recommender (recbole/model/content_based_recommender/cb.py).
+# Items are embedded from their title + genres with a sentence-BERT model; the plot description is
+# embedded separately and mixed in with weight separate_content_weight. A user is the average of the
+# embeddings of their training items; score(u, i) = sim(user embedding, item embedding).
 model: CB
 load_col:
   inter: [user_id, item_id, rating, timestamp]   # same as base.yaml, so the split is identical
-  item: [item_id, movie_title, class]
+  item: [item_id, movie_title, class, description]
 content: [movie_title, class]
+separate_content: [description]
+separate_content_weight: 0.3
+aggregation_method: avg_pos
+pos_rating_threshold: 4.0       # base.yaml already drops ratings < 3, so a threshold of 3 would make avg_pos the same as avg
 epochs: 1                       # nothing to train: embeddings are fixed
