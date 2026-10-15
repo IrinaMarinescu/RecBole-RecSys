@@ -215,6 +215,78 @@ mostly replace hits from ItemKNN/BPR. The best mix gives CB the smallest share i
 python -m unittest discover -s tests/hybrid -v
 ```
 
+## Hybrid Regression (learned score weights)
+
+> This section covers **only Hybrid Regression**. It is separate from the Mixed Hybrid above.
+> Mixed Hybrid interleaves ranked lists. Hybrid Regression fits a logistic regression on the
+> models' raw scores. Its files are `recbole/model/general_recommender/hybrid_regression.py`,
+> `tune_hybrid_regression.py`, `run_hybrid_regression.py`, `configs/hybrid_regression_best.yaml`,
+> `tests/hybrid/test_hybrid_regression.py` and `outputs/HybridRegression/`.
+
+`HybridRegression` learns one coefficient per base model. The tuning scripts use the score
+matrices in `outputs/<model>/scores.npz` (the same split for every model) instead of calling
+the base models again. Each validation interaction is a positive example. For every positive,
+`num_negatives` items are drawn from outside that user's training and validation history.
+Features are the base models' scores for that pair, passed through a `StandardScaler` and an
+L1/L2 logistic regression (`liblinear`), the same meta-learner as `HybridRegression.fit_weights`.
+
+Item order is the order of the linear score `coef / scale`. That is the same order as
+`predict_proba`. Coefficients are also stored rescaled to sum to 1 when the sum is positive,
+so the mix can be read as a weighted blend. The rescaling is not used for ranking.
+
+### Hybrid Regression: tuning on validation, evaluating once on test
+
+Primary selection metric: **NDCG@10** (same as `configs/base.yaml`). `tune_hybrid_regression.py`
+does not open the test split.
+
+Candidates, same list as the mixed-hybrid comparison:
+
+| Kind | Models |
+|------|--------|
+| neighbourhood / item-item | `ItemKNN`, `UserKNN`, `EASE`, `SLIMElastic` |
+| latent factor | `BPR`, `LightGCN`, `SimpleX`, `RecVAE` |
+| content | `ContentBased` |
+
+```bash
+python run_model.py SLIMElastic EASE RecVAE SimpleX BPR LightGCN UserKNN ItemKNN ContentBased
+python tune_hybrid_regression.py
+python run_hybrid_regression.py
+```
+
+Reported metrics are Recall@10, MRR@10, NDCG@10, Hit@10 and Precision@10.
+
+`tune_hybrid_regression.py` does the following on validation:
+
+1. **Standalone metrics, top-10 overlap, and score correlation.** Overlap is the same kind of
+   redundancy check as for list mixing. Correlation is there because this hybrid adds scores,
+   so two models that rank similarly and also move together are redundant features.
+2. **Exhaustive search.** Every subset of at least two of the 9 models (502 subsets), and for
+   each subset every hyperparameter: `C` in {0.01, 0.1, 1, 10}, `penalty` in {l1, l2},
+   `num_negatives` in {1, 5, 20}. That is 12,048 fits. A subset can contain several models
+   of the same kind. Model order is not searched; it does not change a logistic regression.
+3. **Choice of selection method.** Searching thousands of fits on the same users overfits them.
+   The methods are `BestSingle` (best single model, scored on its own, not fitted as a
+   one-model hybrid), `OnePerKind` (best model of each kind, then the best mix of at least
+   two of those), `Greedy` (start from the best single model, then add the model that most
+   improves validation NDCG@10, retuning at each step, stop when it drops), and `Exhaustive`
+   (best mix of at least two models). Validation users are split into random halves 10 times.
+   Each method refits
+   on one half and is scored on the other (20 folds). The method with the best mean held-out
+   NDCG@10 is applied to the full validation set. Ties go to the simpler method.
+
+The frozen configuration is written to `configs/hybrid_regression_best.yaml`. Tables go to
+`outputs/HybridRegression/` (`standalone_valid.csv`, overlap and correlation CSVs,
+`search_valid.csv.gz`, `greedy_path_valid.csv`, `split_half_valid.csv`,
+`split_half_summary_valid.csv`, `recs_valid.tsv`). `run_hybrid_regression.py` evaluates that
+configuration once on test, next to every candidate and the other methods' picks, and writes
+`recs_test.tsv`, `test_comparison.csv` and `test_metrics.json`.
+
+### Hybrid Regression: tests
+
+```bash
+python -m unittest discover -s tests/hybrid -p test_hybrid_regression.py -v
+```
+
 ---
 
 # About RecBole
