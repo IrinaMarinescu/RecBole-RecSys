@@ -10,6 +10,15 @@ from recbole.utils.experiment import REPO_DIR, load_split
 
 HEAD_SHARE = 0.2            # share of items in the short head / users in the active group
 CALIBRATION_ALPHA = 0.01    # smoothing of the recommended genre distribution (Steck, 2018)
+TAIL_SHARE = 0.5            # popularity groups: head = top 20%, tail = bottom 50%, middle = the rest
+AGE_BINS = [0, 25, 35, 45, 200]
+AGE_LABELS = ["<25", "25-34", "35-44", "45+"]
+GROUP_ORDER = {  # natural order of the group labels, for tables and plots
+    "activity": ["low", "medium", "high"],
+    "mainstreaminess": ["niche", "average", "mainstream"],
+    "age": AGE_LABELS,
+    "popularity": ["head", "middle", "tail"],
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -167,6 +176,20 @@ def load_item_genres(path=None):
     return {item: set(genres.split()) for item, genres in zip(items["item_id"], items["class"])}
 
 
+def load_user_demographics(path=None):
+    """DataFrame user_id, age, gender, occupation from the ML-100K user file (ids as strings)."""
+    path = path or os.path.join(REPO_DIR, "dataset", "ml-100k", "ml-100k.user")
+    users = pd.read_csv(path, sep="\t", dtype=str)
+    users.columns = [c.split(":")[0] for c in users.columns]
+    users["age"] = users["age"].astype(int)
+    return users[["user_id", "age", "gender", "occupation"]]
+
+
+def _tertiles(values, labels):
+    """{key: label} splitting a Series into three equal-size groups (ties broken by order)."""
+    return pd.qcut(values.rank(method="first"), 3, labels=labels).astype(str).to_dict()
+
+
 class Evaluator:
     """Computes all metrics for top-N lists against one ground-truth split.
 
@@ -289,3 +312,95 @@ class Evaluator:
         table = users.drop(columns=["user_id"]).groupby("user_group").mean()
         table.insert(0, "n_users", users["user_group"].value_counts())
         return table
+
+    # ----------------------------------------------------------------------- #
+    # Group analysis (Task 2.5)
+    # ----------------------------------------------------------------------- #
+    def user_groupings(self, demographics=None):
+        """{grouping name: {user_id: group label}}.
+
+        activity        tertiles of the number of training interactions (low / medium / high)
+        mainstreaminess tertiles of the mean popularity of the user's training items (niche / average / mainstream)
+        gender, age, occupation   from the ML-100K user file, if `demographics` is given
+        """
+        activity = pd.Series({u: len(h) for u, h in self.history.items()})
+        taste = pd.Series({u: np.mean([self.item_popularity.get(i, 0) for i in h]) for u, h in self.history.items()})
+        groupings = {
+            "activity": _tertiles(activity, ["low", "medium", "high"]),
+            "mainstreaminess": _tertiles(taste, ["niche", "average", "mainstream"]),
+        }
+        if demographics is not None:
+            d = demographics.set_index("user_id")
+            groupings["gender"] = d["gender"].to_dict()
+            groupings["age"] = pd.cut(d["age"], AGE_BINS, right=False, labels=AGE_LABELS).astype(str).to_dict()
+            groupings["occupation"] = d["occupation"].to_dict()
+        return groupings
+
+    def item_groupings(self):
+        """{grouping name: {item_id: list of group labels}} (an item can be in several genres).
+
+        popularity  head = top 20% by training interactions (the short head), tail = bottom 50%, middle = rest
+        genre       every genre of the movie
+        """
+        ranked = (pd.Series(self.item_popularity).reindex(self.catalog, fill_value=0)
+                  .sort_values(ascending=False, kind="stable").index)
+        n_head = int(round(HEAD_SHARE * len(ranked)))
+        n_tail = int(round(TAIL_SHARE * len(ranked)))
+        popularity = {i: ["head"] for i in ranked[:n_head]}
+        popularity.update({i: ["middle"] for i in ranked[n_head:len(ranked) - n_tail]})
+        popularity.update({i: ["tail"] for i in ranked[len(ranked) - n_tail:]})
+        genre = {i: sorted(self.item_genres.get(i, {"unknown"})) for i in self.catalog}
+        return {"popularity": popularity, "genre": genre}
+
+    def user_group_table(self, recs, k=10, groupings=None):
+        """Every per-user metric averaged within each user group; one row per (grouping, group).
+
+        avg_test_items is reported because accuracy@k rises with the number of relevant items a user has,
+        so groups that differ in it (e.g. niche users are mostly heavy users) are not directly comparable.
+        """
+        users, _ = self.per_user(recs, k)
+        metrics = users.drop(columns=["user_id", "user_group"])
+        metrics.insert(0, "avg_test_items", users["user_id"].map(lambda u: len(self.relevant[u])))
+        rows = []
+        for name, labels in (groupings or self.user_groupings()).items():
+            group = users["user_id"].map(labels)
+            for label, part in metrics.groupby(group):
+                rows.append({"grouping": name, "group": label, "n_users": len(part), **part.mean().to_dict()})
+        return pd.DataFrame(rows)
+
+    def item_group_table(self, recs, k=10, groupings=None):
+        """How each item group is treated; one row per (grouping, group).
+
+        catalog_share   share of catalogue items in the group
+        relevant_share  share of all relevant (test) interactions that involve the group
+        exposure_share  share of all recommendation slots filled with items of the group
+        hit_share       share of all hits that are items of the group
+        recall          hits on the group / relevant interactions with the group (summed over users)
+        coverage        share of the group's items recommended to at least one user
+        Genres overlap, so their shares sum to more than 1.
+        """
+        _, lists = self.per_user(recs, k)
+        lists = {u: lists.get(u, []) for u in self.relevant}
+        n_slots = sum(len(lst) for lst in lists.values())
+        n_relevant = sum(len(rel) for rel in self.relevant.values())
+        n_hits = sum(i in self.relevant[u] for u, lst in lists.items() for i in lst)
+        rows = []
+        for name, labels in (groupings or self.item_groupings()).items():
+            members = {}
+            for item, groups in labels.items():
+                for g in groups:
+                    members.setdefault(g, set()).add(item)
+            for label, items in sorted(members.items()):
+                relevant = sum(len(rel & items) for rel in self.relevant.values())
+                exposed = [i for lst in lists.values() for i in lst if i in items]
+                hits = sum(i in self.relevant[u] for u, lst in lists.items() for i in lst if i in items)
+                rows.append({
+                    "grouping": name, "group": label, "n_items": len(items),
+                    "catalog_share": len(items) / len(self.catalog),
+                    "relevant_share": relevant / n_relevant,
+                    "exposure_share": len(exposed) / n_slots,
+                    "hit_share": hits / n_hits if n_hits else 0.0,
+                    f"recall@{k}": hits / relevant if relevant else float("nan"),
+                    f"coverage@{k}": len(set(exposed)) / len(items),
+                })
+        return pd.DataFrame(rows)
