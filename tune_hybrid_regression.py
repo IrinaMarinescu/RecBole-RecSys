@@ -141,7 +141,10 @@ def select_index(method, scores, masks, names, kinds, standalone, single_scores=
     if method == "BestSingle":
         return best_single_index(scores, masks)
     if method == "OnePerKind":
-        return one_per_kind_index(scores, masks, names, kinds, standalone)
+        # On a half-split, representatives come from the selection half only.
+        # standalone is the full validation set and is used after the method is chosen.
+        baseline = standalone if single_scores is None else single_scores
+        return one_per_kind_index(scores, masks, names, kinds, baseline)
     if method == "Greedy":
         baseline = standalone if single_scores is None else single_scores
         start = int(np.argmax(baseline))
