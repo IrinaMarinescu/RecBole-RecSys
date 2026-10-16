@@ -19,6 +19,7 @@ from tune_hybrid_regression import (
     exhaustive_index,
     greedy_index,
     one_per_kind_index,
+    select_index,
 )
 
 
@@ -136,6 +137,15 @@ class TestSelection(unittest.TestCase):
         scores = scores.copy()
         scores[5] = 0.70
         self.assertEqual(one_per_kind_index(scores, masks, names, kinds, standalone), 5)
+
+    def test_one_per_kind_fold_uses_the_selection_half(self):
+        scores, masks, names, kinds, standalone = self._toy()
+        # Full validation prefers A. This selection half prefers B, so B+C is the mix.
+        half = np.array([0.10, 0.90, 0.30])
+        chosen = select_index(
+            "OnePerKind", scores, masks, names, kinds, standalone, single_scores=half
+        )
+        self.assertEqual(chosen, 6)
 
     def test_tie_keeps_the_earlier_row(self):
         scores = np.array([0.2, 0.2])
