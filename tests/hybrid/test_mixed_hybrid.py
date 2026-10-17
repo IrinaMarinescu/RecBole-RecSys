@@ -2,9 +2,16 @@
 
 import unittest
 
+import numpy as np
 import pandas as pd
 
-from recbole.model.general_recommender.mixed_hybrid import evaluate_recommendations, mix_recommendations
+from recbole.model.general_recommender.mixed_hybrid import (
+    evaluate_arrays,
+    evaluate_recommendations,
+    mix_arrays,
+    mix_recommendations,
+    to_arrays,
+)
 
 
 def _recs(model_rows):
@@ -114,6 +121,46 @@ class TestMixing(unittest.TestCase):
         self.assertEqual(len(mixed), 6)
         self.assertIn("A1", mixed["item_id"].tolist())
         self.assertIn("B1", mixed["item_id"].tolist())
+
+
+class TestArrayVersion(unittest.TestCase):
+    """mix_arrays / evaluate_arrays must give exactly the same results as the reference functions."""
+
+    def test_matches_reference(self):
+        rng = np.random.default_rng(0)
+        models = ["A", "B", "C", "D"]
+        users = [f"u{u}" for u in range(30)]
+        # Small item pool so lists overlap a lot; some users are missing from some models
+        # and some lists are shorter than top_k.
+        sources = {
+            name: _recs({
+                user: rng.choice(25, size=rng.integers(3, 15), replace=False).tolist()
+                for user in users if rng.random() > 0.1
+            })
+            for name in models
+        }
+        truth = pd.DataFrame(
+            [(user, str(item)) for user in users for item in rng.choice(25, size=rng.integers(1, 6), replace=False)],
+            columns=["user_id", "item_id"],
+        )
+        lists, item_ids = to_arrays(sources, models, users)
+        index = {item: i for i, item in enumerate(item_ids)}
+        relevant = np.zeros((len(users), len(item_ids) + 1), dtype=bool)  # last column: items no model recommends
+        for user, item in zip(truth["user_id"], truth["item_id"]):
+            relevant[users.index(user), index.get(item, len(item_ids))] = True
+
+        for quotas in ([1, 1, 1, 1], [3, 0, 2, 1], [10, 0, 0, 0], [0, 4, 0, 6], [2, 5, 1, 7]):
+            reference = mix_recommendations(sources, models, dict(zip(models, quotas)), top_k=10)
+            chosen = mix_arrays(lists, quotas, top_k=10)
+            for u, user in enumerate(users):
+                expected = reference.loc[reference["user_id"] == user, "item_id"].tolist()
+                got = [item_ids[i] for i in chosen[u] if i >= 0]
+                self.assertEqual(got, expected, f"quotas={quotas} user={user}")
+
+            expected_metrics = evaluate_recommendations(reference, truth, k=10)
+            metrics, _ = evaluate_arrays(chosen, relevant)
+            for name, value in expected_metrics.items():
+                self.assertAlmostEqual(metrics[name], value, places=12, msg=f"{name} quotas={quotas}")
 
 
 class TestEvaluation(unittest.TestCase):

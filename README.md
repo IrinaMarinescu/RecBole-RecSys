@@ -128,21 +128,27 @@ combining them in a *weighted / regression* hybrid.
 - `recbole/utils/experiment.py` restores the best checkpoint with `weights_only=False`, because
   `torch.load`'s default changed in PyTorch 2.6.
 
-## Mixed Hybrid (list mixing)
+## Hybrid model: Mixed Hybrid (list mixing)
 
-The Mixed Hybrid is a **separate** approach from the Logistic Regression weighted hybrid.
-It does **not** combine raw scores. It interleaves already-ranked recommendation lists,
-deduplicates per user, and keeps the first `K` unique items.
+> This section covers **only the Mixed Hybrid**. The project has several hybrid models (for
+> example the Logistic Regression weighted hybrid, `run_hybrid.py`); each is a separate
+> implementation with its own scripts, config and results. The files of this one are
+> `recbole/model/general_recommender/mixed_hybrid.py`, `tune_mixed_hybrid.py`,
+> `run_mixed_hybrid.py`, `configs/mixed_hybrid_best.yaml`, `tests/hybrid/test_mixed_hybrid.py`
+> and `outputs/MixedHybrid/`.
 
-Preferred sources (different paradigms):
+The Mixed Hybrid does **not** combine raw scores. It interleaves already-ranked recommendation
+lists, deduplicates per user, and keeps the first `K` unique items.
 
-| Source | Paradigm |
-|--------|----------|
-| `ItemKNN` | neighbourhood collaborative filtering |
-| `BPR` | matrix factorisation / personalized ranking |
-| `ContentBased` | content similarity (`CB` model, run through `run_model.py`) |
+Candidate sources: every model with tuned hyperparameters in `configs/tuned/`.
 
-### Strategy
+| Kind | Models |
+|------|--------|
+| neighbourhood / item-item | `ItemKNN`, `UserKNN`, `EASE`, `SLIMElastic` |
+| latent factor | `BPR`, `LightGCN`, `SimpleX`, `RecVAE` |
+| content | `ContentBased` (`CB` model, run through `run_model.py`) |
+
+### Mixed Hybrid: strategy
 
 Two mixers are implemented in `recbole/model/general_recommender/mixed_hybrid.py`:
 
@@ -161,58 +167,125 @@ Round 2: ItemKNN, ItemKNN, BPR, ContentBased
 Deduplication is **per user**. If one source runs out of candidates, the others continue.
 
 
-### Tune on validation, evaluate once on test
+### Mixed Hybrid: tuning on validation, evaluating once on test
 
-Primary selection metric: **NDCG@10** (same as `configs/base.yaml`).
+Primary selection metric: **NDCG@10** (same as `configs/base.yaml`). The test set is never used
+for any choice.
 
 ```bash
-python run_model.py ItemKNN BPR ContentBased   # prerequisite: the source lists
-python tune_mixed_hybrid.py
+python run_model.py RecVAE SLIMElastic EASE LightGCN BPR SimpleX ItemKNN UserKNN ContentBased
+python tune_mixed_hybrid.py      # ~15 min with 4 worker processes
 python run_mixed_hybrid.py
 ```
 
-`tune_mixed_hybrid.py` never reads the test set for selection. It writes:
+`tune_mixed_hybrid.py` does the following on the validation lists:
 
-- `configs/mixed_hybrid_best.yaml` — frozen best quotas
-- `outputs/MixedHybrid/tuning_valid.csv` — all validation configurations
-- `outputs/MixedHybrid/recs_valid.tsv`
+1. **Standalone + overlap analysis.** For every pair of models: the mean number of shared
+   top-10 items per user, and the mean number of correct items one model finds that the other
+   misses. Also, per model, the correct items no other model finds.
+2. **Exhaustive quota search** over all 9 candidates: every quota vector with 0..10 items per
+   model and a total of 1..10 (a total above 10 behaves like 10), i.e. 92,377 configurations,
+   with models in order of standalone validation NDCG@10. A quota of 0 drops a model, so every
+   subset of models is included, including several models of the same kind.
+3. **Order search.** A model earlier in a round fills higher ranks, so for a chosen set of
+   models every ordering x every positive quota vector is tried (up to 6 models).
+4. **Choice of selection method.** Four methods pick a configuration from steps 2-3:
+   `BestSingle` (best single model), `OnePerKind` (best model of each kind, then their best
+   mix), `Greedy` (add models one at a time while NDCG@10 improves), `Exhaustive` (best
+   overall). Searching more configurations fits more validation noise, so validation users are
+   split into random halves 10 times; each method selects on one half and is scored on the
+   other (20 folds). The method with the best mean held-out NDCG@10 is applied to the whole
+   validation set to give the final configuration.
 
-`run_mixed_hybrid.py` loads that frozen config, builds test recommendations, reports standalone
-vs Mixed Hybrid metrics on the **same** test split, and writes:
+The search uses `mix_arrays` / `evaluate_arrays`, a vectorised version of
+`mix_recommendations` / `evaluate_recommendations` (a test checks they give identical results).
+The final configuration is also re-evaluated with the reference implementation.
 
-- `outputs/MixedHybrid/recs_test.tsv` (`user_id, item_id, rank, source, score`)
-- `outputs/MixedHybrid/test_metrics.json`
+Outputs (`outputs/MixedHybrid/`):
 
-### Results (seed 2020, ML-100K, ratings >= 3)
+| File | Contents |
+|---|---|
+| `standalone_valid.csv` | validation metrics of every candidate |
+| `overlap_shared_top10_valid.csv` | mean shared top-10 items per user, per pair of models |
+| `overlap_extra_hits_valid.csv` | mean correct items the row model finds that the column model misses |
+| `exclusive_hits_valid.csv` | correct items per user, and those no other model finds |
+| `search_valid.csv.gz` | all 92,377 configurations of the exhaustive search |
+| `greedy_path_valid.csv` | models added by the greedy method and the gain of each step |
+| `order_search_valid.csv` | every ordering x quota vector for the final set of models |
+| `split_half_valid.csv`, `split_half_summary_valid.csv` | the selection-method comparison |
+| `recs_valid.tsv` | validation recommendations of the final configuration |
+| `recs_test.tsv`, `test_comparison.csv`, `test_metrics.json` | written by `run_mixed_hybrid.py` |
 
-Validation (selection by NDCG@10, full table in `outputs/MixedHybrid/tuning_valid.csv`):
+`configs/mixed_hybrid_best.yaml` holds the final configuration, plus the configuration each
+other method picked (`alternatives`), which `run_mixed_hybrid.py` reports on test for comparison
+only.
 
-| Configuration | Recall@10 | MRR@10 | NDCG@10 |
-|---|---|---|---|
-| RoundRobin | 0.2030 | 0.3715 | 0.2076 |
-| ItemKNN=5 BPR=3 CB=2 | 0.2179 | 0.3803 | 0.2223 |
-| **ItemKNN=4 BPR=4 CB=2** | 0.2161 | 0.3798 | **0.2226** |
-| ItemKNN=3 BPR=5 CB=2 | 0.2156 | 0.3815 | 0.2221 |
-| ItemKNN=4 BPR=3 CB=3 | 0.2017 | 0.3769 | 0.2133 |
-| ItemKNN=2 BPR=3 CB=5 | 0.1677 | 0.3694 | 0.1909 |
+### Mixed Hybrid: results (seed 2020, ML-100K, ratings >= 3)
 
-Test (frozen config, evaluated once):
+**Overlap (validation).** The eight collaborative models share 4.7-7.6 of their top-10 items
+per user (most similar: EASE/SLIMElastic 7.6, LightGCN/BPR 7.2). ContentBased shares only
+about 0.5 with any of them; it finds the most items no other model finds (0.147 per user),
+but few correct items in total (0.31 per user vs 1.35-1.53). Among the collaborative models,
+LightGCN (0.116) and SimpleX (0.090) find the most items no other model finds; EASE finds
+almost none (0.012), as SLIMElastic and RecVAE cover nearly the same items.
+
+**Exhaustive search (validation NDCG@10, best configuration per number of models):**
+
+| Models | Best configuration | NDCG@10 |
+|---|---|---|
+| 1 | RecVAE | 0.2500 |
+| 2 | RecVAE=3 SLIMElastic=1 | 0.2539 |
+| 3 | RecVAE=2 SLIMElastic=5 BPR=1 | 0.2540 |
+| 4 | RecVAE=3 SLIMElastic=2 BPR=1 SimpleX=1 | 0.2537 |
+| 5 | RecVAE=2 SLIMElastic=2 EASE=1 BPR=1 SimpleX=1 | 0.2537 |
+| 6 | + LightGCN, ItemKNN | 0.2519 |
+| 9 | all models (ContentBased=1) | 0.2380 |
+
+Beyond 3 models nothing improves, and every best configuration with ContentBased is worse than
+the same one without it.
+
+**Selection methods (20 validation half splits, held-out NDCG@10):**
+
+| Method | Held-out | Selection half | Optimism | vs BestSingle (paired) |
+|---|---|---|---|---|
+| BestSingle | 0.2466 | 0.2509 | 0.0043 | |
+| OnePerKind | 0.2471 | 0.2548 | 0.0078 | +0.0005, better in 10/20 |
+| Greedy | 0.2475 | 0.2584 | 0.0108 | +0.0010, better in 12/20 |
+| **Exhaustive** | **0.2478** | 0.2586 | 0.0107 | +0.0013, better in 13/20 |
+
+Exhaustive generalises best, so it is used, but the gain over a single model is small and
+within the fold-to-fold noise. The larger "optimism" (selection minus held-out score) of the
+searching methods shows how much of their validation gain is fitted noise.
+
+**Final Mixed Hybrid configuration** (Exhaustive on the whole validation set): `BPR=1 SLIMElastic=4 RecVAE=5`,
+in that order: BPR's top item, then SLIMElastic's top 4 new items, then RecVAE's top 5 new
+items. Validation NDCG@10 = 0.2563 (RecVAE alone: 0.2500).
+
+**Test (final Mixed Hybrid configuration evaluated once; the other rows are for comparison only):**
 
 | Model | Recall@10 | MRR@10 | NDCG@10 | Hit@10 | Precision@10 |
 |---|---|---|---|---|---|
-| ItemKNN | 0.2266 | 0.3966 | 0.2389 | 0.6903 | 0.1524 |
+| SLIMElastic | 0.2661 | 0.4593 | **0.2825** | 0.7381 | 0.1775 |
+| EASE | 0.2640 | 0.4593 | 0.2813 | 0.7359 | 0.1757 |
+| RecVAE | 0.2561 | 0.4421 | 0.2696 | 0.7222 | 0.1690 |
+| SimpleX | 0.2479 | 0.4353 | 0.2585 | 0.7222 | 0.1595 |
 | BPR | 0.2434 | 0.4277 | 0.2578 | 0.7190 | 0.1628 |
-| ContentBased | 0.0280 | 0.0651 | 0.0291 | 0.1866 | 0.0223 |
-| Mixed Hybrid (4:4:2) | 0.2168 | 0.3966 | 0.2356 | 0.6797 | 0.1468 |
+| LightGCN | 0.2509 | 0.4207 | 0.2571 | 0.7232 | 0.1641 |
+| UserKNN | 0.2344 | 0.3972 | 0.2400 | 0.6925 | 0.1487 |
+| ItemKNN | 0.2266 | 0.3966 | 0.2389 | 0.6903 | 0.1524 |
+| ContentBased | 0.0417 | 0.0977 | 0.0450 | 0.2460 | 0.0323 |
+| **Mixed Hybrid `BPR=1 SLIMElastic=4 RecVAE=5`** | **0.2667** | 0.4470 | 0.2778 | **0.7444** | 0.1742 |
+| OnePerKind pick `RecVAE=3 SLIMElastic=1` | 0.2650 | 0.4482 | 0.2766 | 0.7402 | 0.1736 |
 
-The Mixed Hybrid does not beat BPR. On validation, every extra slot given to ContentBased lowers
-NDCG@10, because CB alone is roughly 8x weaker than the collaborative models, so the slots it gets
-mostly replace hits from ItemKNN/BPR. The best mix gives CB the smallest share in the grid.
+The Mixed Hybrid has the best Recall@10 and Hit@10 on test and beats RecVAE, the best single model on
+validation (+0.008 NDCG@10). It does not beat SLIMElastic or EASE on NDCG@10/MRR@10: these rank
+below RecVAE on validation but above it on test, so the validation-best model is not the
+test-best one. The Mixed Hybrid sits between its sources.
 
-### Tests
+### Mixed Hybrid: tests
 
 ```bash
-python -m unittest discover -s tests/hybrid -v
+python -m unittest discover -s tests/hybrid -p test_mixed_hybrid.py -v
 ```
 
 ---
