@@ -128,6 +128,43 @@ combining them in a *weighted / regression* hybrid.
 - `recbole/utils/experiment.py` restores the best checkpoint with `weights_only=False`, because
   `torch.load`'s default changed in PyTorch 2.6.
 
+## Evaluation (Task 2.1)
+
+`run_evaluation.py` computes our own metrics from the exported lists (`outputs/<model>/recs_<stage>.tsv`),
+for every model or only those given. Definitions are in `recbole/utils/evaluation.py`; tests in `tests/evaluation/`.
+
+```bash
+python run_evaluation.py                     # all models, test set, k = 10
+python run_evaluation.py --stage valid       # validation set
+python -m unittest discover -s tests/evaluation -v
+```
+
+It writes `outputs/evaluation/<stage>_metrics.csv` (one row per model) and
+`outputs/evaluation/<stage>_user_groups.csv` (per-user metrics averaged per user group).
+Every metric RecBole also implements (Recall, Precision, NDCG, MRR, Hit, MAP, GAUC, ItemCoverage,
+AveragePopularity, GiniIndex, TailPercentage) was checked against RecBole's result and matches.
+The unit tests also recompute the worked examples from the evaluation lectures.
+
+Relevance is binary (the item is in the user's test/validation split). Popularity = number of training
+interactions; the **short head** is the 20% most popular items, the rest is the **long tail**;
+**active users** are the 20% with the most training interactions.
+
+| Metric | What it measures |
+|---|---|
+| NDCG, Recall, Precision, F1, MRR, Hit @k | accuracy of the top-k list (binary relevance, as in the lectures) |
+| MAP@k | mean average precision; AP = sum of precision@j at the relevant ranks / number of hits (lecture example; RecBole divides by min(\|relevant\|, k)) |
+| AUC | probability a relevant item is scored above an irrelevant one, over all unseen items (needs `scores.npz`, so no AUC for list-only outputs) |
+| Coverage | share of the catalogue recommended to at least one user |
+| Gini | how unequally recommendations are spread over items (0 = equal, 1 = all on one item) |
+| Novelty | mean self-information -log2(share of users who interacted with the item); higher = less popular items |
+| ILD | intra-list diversity: mean genre distance (1 - Jaccard) between pairs of items in a list |
+| ARP | average popularity of recommended items |
+| APLT | share of each list from the long tail |
+| PopLift | (ARP of the list - average popularity of the user's history) / the latter; > 0 = popularity bias amplified |
+| Miscalibration | KL divergence between the genre mix of the user's history and of the list (Steck, 2018) |
+| UserNDCGGap | NDCG of active users - NDCG of inactive users (user-side fairness) |
+| TailExposure, TailHitShare | share of all recommendations / of all hits that are long-tail items (item-side fairness) |
+
 ## Hybrid model: Mixed Hybrid (list mixing)
 
 > This section covers **only the Mixed Hybrid**. The project has several hybrid models (for
