@@ -1,16 +1,77 @@
-# Best by valid NDCG@10 = 0.2226 (written by tune_mixed_hybrid.py)
+# Selected by Exhaustive, valid NDCG@10 = 0.2563 (written by tune_mixed_hybrid.py)
 models:
-- ItemKNN
 - BPR
-- ContentBased
+- SLIMElastic
+- RecVAE
 quotas:
-  ItemKNN: 4
-  BPR: 4
-  ContentBased: 2
+  BPR: 1
+  SLIMElastic: 4
+  RecVAE: 5
 primary_metric: NDCG@10
+selection_method: Exhaustive
 valid_metrics:
-  Recall@10: 0.21607425119550322
-  MRR@10: 0.379765271255197
-  NDCG@10: 0.2225844382583548
-  Hit@10: 0.6882290562036055
-  Precision@10: 0.12948038176033935
+  Recall@10: 0.2693533034504122
+  MRR@10: 0.40526982443737486
+  NDCG@10: 0.25631907143237775
+  Hit@10: 0.7635206786850477
+  Precision@10: 0.15588547189819724
+held_out_half_ndcg:
+  BestSingle: 0.24655719951103078
+  OnePerKind: 0.24706607138516362
+  Greedy: 0.24754850267102096
+  Exhaustive: 0.24782173110629846
+alternatives:
+  BestSingle:
+    models:
+    - RecVAE
+    quotas:
+      RecVAE: 1
+    valid_metrics:
+      Recall@10: 0.2642180344950969
+      MRR@10: 0.3868454274604857
+      NDCG@10: 0.2500259163792476
+      Hit@10: 0.7476139978791092
+      Precision@10: 0.15281018027571583
+  OnePerKind:
+    models:
+    - RecVAE
+    - SLIMElastic
+    quotas:
+      RecVAE: 3
+      SLIMElastic: 1
+    valid_metrics:
+      Recall@10: 0.26923305296938277
+      MRR@10: 0.3889423319699036
+      NDCG@10: 0.25389811309940974
+      Hit@10: 0.7550371155885471
+      Precision@10: 0.15609756097560976
+  Greedy:
+    models:
+    - BPR
+    - SLIMElastic
+    - RecVAE
+    quotas:
+      BPR: 1
+      SLIMElastic: 4
+      RecVAE: 5
+    valid_metrics:
+      Recall@10: 0.2693533034504122
+      MRR@10: 0.40526982443737486
+      NDCG@10: 0.25631907143237775
+      Hit@10: 0.7635206786850477
+      Precision@10: 0.15588547189819724
+  Exhaustive:
+    models:
+    - BPR
+    - SLIMElastic
+    - RecVAE
+    quotas:
+      BPR: 1
+      SLIMElastic: 4
+      RecVAE: 5
+    valid_metrics:
+      Recall@10: 0.2693533034504122
+      MRR@10: 0.40526982443737486
+      NDCG@10: 0.25631907143237775
+      Hit@10: 0.7635206786850477
+      Precision@10: 0.15588547189819724

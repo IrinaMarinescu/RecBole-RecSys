@@ -14,6 +14,7 @@ import math
 import os
 from typing import Dict, List, Mapping, Optional, Sequence
 
+import numpy as np
 import pandas as pd
 
 PRIMARY_METRIC = "NDCG@10"  # same as valid_metric in configs/base.yaml
@@ -143,6 +144,94 @@ def evaluate_recommendations(recommendations: pd.DataFrame, ground_truth: pd.Dat
         f"Hit@{k}": mean(hits),
         f"Precision@{k}": mean(precisions),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Array versions for large searches (same results as mix_recommendations /
+# evaluate_recommendations, about 100x faster)
+# --------------------------------------------------------------------------- #
+def to_arrays(recommendations: Recommendations, model_order: Sequence[str], users: Sequence[str]):
+    """Ranked lists as an int array [n_models, n_users, depth], padded with -1.
+
+    Returns (lists, item_ids): lists holds indices into item_ids.
+    """
+    ranked = {name: _ranked_item_lists(recommendations.get(name)) for name in model_order}
+    item_ids = sorted({item for lists in ranked.values() for items in lists.values() for item in items})
+    item_index = {item: i for i, item in enumerate(item_ids)}
+    depth = max((len(items) for lists in ranked.values() for items in lists.values()), default=0)
+    arrays = np.full((len(model_order), len(users), depth), -1, dtype=np.int32)
+    for m, name in enumerate(model_order):
+        for u, user_id in enumerate(users):
+            items = ranked[name].get(str(user_id), [])
+            arrays[m, u, :len(items)] = [item_index[item] for item in items]
+    return arrays, item_ids
+
+
+def mix_arrays(lists: np.ndarray, quotas: Sequence[int], top_k: int = TOP_K) -> np.ndarray:
+    """mix_recommendations on the output of to_arrays, for all users at once.
+
+    quotas[m] is the quota of lists[m]; models take their turns in array order.
+    Returns the chosen item indices [n_users, top_k], padded with -1.
+    """
+    n_models, n_users, depth = lists.shape
+    rows = np.arange(n_users)
+    chosen = np.full((n_users, top_k), -1, dtype=lists.dtype)
+    filled = np.zeros(n_users, dtype=np.int64)
+    pointers = np.zeros((n_models, n_users), dtype=np.int64)
+    if depth == 0:
+        return chosen
+
+    while True:
+        progressed = False
+        for m in range(n_models):
+            for _ in range(min(int(quotas[m]), top_k)):
+                active = filled < top_k
+                if not active.any():
+                    break
+                # Move each user's pointer past items that are already chosen.
+                while True:
+                    inside = pointers[m] < depth
+                    current = np.where(inside, lists[m, rows, np.minimum(pointers[m], depth - 1)], -1)
+                    available = inside & (current >= 0)
+                    skip = active & available & (chosen == current[:, None]).any(axis=1)
+                    if not skip.any():
+                        break
+                    pointers[m][skip] += 1
+                take = active & available
+                if not take.any():
+                    break
+                users = rows[take]
+                chosen[users, filled[users]] = current[take]
+                filled[users] += 1
+                pointers[m][take] += 1
+                progressed = True
+        if not progressed or filled.min() >= top_k:
+            return chosen
+
+
+def evaluate_arrays(chosen: np.ndarray, relevant: np.ndarray):
+    """evaluate_recommendations on mix_arrays output.
+
+    relevant is a bool array [n_users, n_items] of ground-truth items; every user must have at least one.
+    Returns (metrics dict, per-user NDCG array).
+    """
+    n_users, k = chosen.shape
+    hits = relevant[np.arange(n_users)[:, None], np.maximum(chosen, 0)] & (chosen >= 0)
+    n_relevant = relevant.sum(axis=1)
+    discounts = 1.0 / np.log2(np.arange(k) + 2)
+    ideal = np.cumsum(discounts)[np.minimum(n_relevant, k) - 1]
+    ndcg = (hits * discounts).sum(axis=1) / ideal
+    n_hits = hits.sum(axis=1)
+    any_hit = n_hits > 0
+    mrr = np.where(any_hit, 1.0 / (hits.argmax(axis=1) + 1), 0.0)
+    metrics = {
+        f"Recall@{k}": float((n_hits / n_relevant).mean()),
+        f"MRR@{k}": float(mrr.mean()),
+        f"NDCG@{k}": float(ndcg.mean()),
+        f"Hit@{k}": float(any_hit.mean()),
+        f"Precision@{k}": float((n_hits / k).mean()),
+    }
+    return metrics, ndcg
 
 
 def format_metrics(metrics: Mapping[str, float], digits: int = 4) -> str:
