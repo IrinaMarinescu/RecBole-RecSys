@@ -397,6 +397,69 @@ configuration once on test, next to every candidate and the other methods' picks
 python -m unittest discover -s tests/hybrid -p test_hybrid_regression.py -v
 ```
 
+## Feature Augmentation Hybrid (pseudo-interactions)
+
+> This section covers **only the Feature Augmentation hybrid**. Its files are
+> `recbole/model/general_recommender/hybrid_feature_aug.py`, `tune_hybrid_feature_aug.py`,
+> `configs/hybrid_feature_aug_best.yaml`, `tests/hybrid/test_hybrid_feature_aug.py`,
+> `tests/hybrid/test_tune_hybrid_feature_aug.py` and `outputs/HybridFeatureAug/`.
+
+Source models add each user's top-`n_pseudo` unseen items to the training matrix with value
+`pseudo_weight` (the union over sources); a closed-form target model is then refitted on that
+denser matrix: `R_aug = R + pseudo_weight * TopN(sources)`. With no sources it is the plain target.
+
+| Role | Models |
+|------|--------|
+| source, neighbourhood / item-item | `SLIMElastic`, `EASE`, `ItemKNN` |
+| source, latent factor | `RecVAE`, `SimpleX`, `BPR`, `LightGCN` |
+| source, content | `ContentBased` |
+| target | `ItemKNN`, `EASE`, `SLIMElastic` |
+
+### Feature Augmentation: tuning on validation
+
+Primary selection metric: **NDCG@10**. `tune_hybrid_feature_aug.py` does not open the test split.
+
+```bash
+python run_model.py SLIMElastic EASE ItemKNN RecVAE SimpleX BPR LightGCN ContentBased
+python tune_hybrid_feature_aug.py                          # all targets: roughly 1.5-2 h with 10 workers (estimate)
+python tune_hybrid_feature_aug.py --targets ItemKNN EASE   # without SLIMElastic: roughly 30 min
+```
+
+1. **Standalone metrics and overlap** of the sources, as for the other hybrids.
+2. **Exhaustive search.** Every subset of the 8 sources (255, plus no sources) x `n_pseudo` in
+   {2, 5, 10, 20} x `pseudo_weight` in {0.25, 0.5, 1} x target x target hyperparameters
+   (ItemKNN `k` in {100, 200, 400} x `shrink` in {0, 10}; EASE `reg_weight` in
+   {250, 500, 1000, 2000}; SLIMElastic at its tuned values only, because one fit takes about 12 s).
+   That is 33,671 configurations. Every one is fitted on train with
+   `HybridFeatureAugmentation.fit_augmentation` and scored on all validation users. Source
+   rankings are computed once with the hybrid's `_rank_candidates`, from the exported
+   `outputs/<model>/scores.npz`.
+3. **Choice of selection method.** `NoAugmentation` (best plain target), `ContentBoosted`
+   (ContentBased as the only source on that target, only `n_pseudo` and `pseudo_weight` tuned;
+   content-boosted CF, Melville et al., 2002), `OnePerKind` (best source of each kind, then the
+   best subset of those), `Greedy` (start from no augmentation, add the source that most improves
+   NDCG@10, retuning everything else, stop when nothing helps) and `Exhaustive` (best overall).
+   As for the other hybrids, each method selects on one half of the validation users and is
+   scored on the other (20 folds); the best mean held-out NDCG@10 wins, ties go to the simpler
+   method.
+4. **Cross-check.** The final configuration is refitted with a fresh `HybridFeatureAugmentation`
+   on RecBole's own dataset and evaluated with `evaluate_recommendations`; the result must equal
+   the search.
+
+Results of each target are cached in `outputs/HybridFeatureAug/search_cache_<target>.npz`, so an
+interrupted run resumes; the cache is ignored when the sources, the split or the grid change
+(`--no-cache` refits everything). The final configuration and every method's pick
+(`alternatives`) are written to `configs/hybrid_feature_aug_best.yaml`; the tables
+(`standalone_valid.csv`, overlap CSVs, `search_valid.csv.gz`, `greedy_path_valid.csv`,
+`split_half_valid.csv`, `split_half_summary_valid.csv`, `recs_valid.tsv`) go to
+`outputs/HybridFeatureAug/`.
+
+### Feature Augmentation: tests
+
+```bash
+python -m unittest discover -s tests/hybrid -p "test_*feature_aug.py" -v
+```
+
 ---
 
 # About RecBole
