@@ -165,34 +165,6 @@ interactions; the **short head** is the 20% most popular items, the rest is the 
 | UserNDCGGap | NDCG of active users - NDCG of inactive users (user-side fairness) |
 | TailExposure, TailHitShare | share of all recommendations / of all hits that are long-tail items (item-side fairness) |
 
-## Group analysis (Task 2.5)
-
-`run_group_analysis.py` shows for which users and items each model works well. Models are **not** retrained
-per group: each model's recommendations (trained on all users) are evaluated separately per group.
-
-```bash
-python run_group_analysis.py                 # all models, test set, k = 10
-python run_group_analysis.py SLIMElastic BPR Pop --stage valid
-```
-
-| Grouping | Groups |
-|---|---|
-| user activity | tertiles of the number of training ratings: low / medium / high |
-| user mainstreaminess | tertiles of the mean popularity of the user's training items: niche / average / mainstream |
-| gender, age, occupation | from `ml-100k.user`; age buckets <25, 25-34, 35-44, 45+ |
-| item popularity | head (top 20% by training interactions, the same short head as above) / middle (next 30%) / tail (bottom 50%) |
-| item genre | every genre of the movie (genres overlap, so their shares sum to more than 1) |
-
-It writes `outputs/evaluation/<stage>_user_group_analysis.csv` (every per-user metric averaged per user group,
-with `n_users` and `avg_test_items`) and `<stage>_item_group_analysis.csv` (per item group: `catalog_share`,
-`relevant_share`, `exposure_share`, `hit_share`, `recall@k`, `coverage@k`, `n_items`).
-
-Two cautions when reading the results:
-- **Accuracy@k rises with the number of test items a user has**, so check `avg_test_items` before comparing
-  groups. For example, niche users get *higher* NDCG than mainstream users, but most niche users are heavy users
-  with ~14 test items vs. ~4 for mainstream users: the effect is mostly user activity, not taste.
-- **Small groups are noisy.** Occupations with fewer than 20 users (e.g. 7 doctors) are in the CSV but not printed.
-
 ## Hybrid model: Mixed Hybrid (list mixing)
 
 > This section covers **only the Mixed Hybrid**. The project has several hybrid models (for
