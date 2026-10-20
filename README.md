@@ -184,7 +184,7 @@ python run_group_analysis.py SLIMElastic BPR Pop --stage valid
 | item genre | every genre of the movie (genres overlap, so their shares sum to more than 1) |
 
 It writes `outputs/evaluation/<stage>_user_group_analysis.csv` (every per-user metric averaged per user group,
-with `n_users` and `avg_test_items`) and `<stage>_item_group_analysis.csv` (per item group: `catalog_share`,
+with `n_users`, `avg_test_items`, `avg_train_items` and the standard error `NDCG@k_se`) and `<stage>_item_group_analysis.csv` (per item group: `catalog_share`,
 `relevant_share`, `exposure_share`, `hit_share`, `recall@k`, `coverage@k`, `n_items`).
 
 Two cautions when reading the results:

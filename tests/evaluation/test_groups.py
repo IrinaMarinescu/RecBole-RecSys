@@ -74,6 +74,24 @@ class GroupTableTest(unittest.TestCase):
         self.assertEqual(low["n_users"], 2)
         self.assertAlmostEqual(low["avg_test_items"], (2 + 1) / 2)
         self.assertAlmostEqual(low["Hit@2"], 1.0)                    # both users get a hit
+        self.assertAlmostEqual(low["avg_train_items"], (1 + 2) / 2)  # u1 rated 1 item, u2 rated 2
+
+    def test_ndcg_standard_error(self):
+        # u1: hit at rank 1 of 2 relevant -> 1 / (1 + 1/log2(3)); u2: its only relevant item at rank 1 -> 1
+        ndcg_u1, ndcg_u2 = 1 / (1 + 1 / math.log2(3)), 1.0
+        low = self.ev.user_group_table(RECS, k=2).set_index(["grouping", "group"]).loc[("activity", "low")]
+        # standard error of the mean of two values = |a - b| / 2
+        self.assertAlmostEqual(low["NDCG@2_se"], abs(ndcg_u1 - ndcg_u2) / 2)
+
+    def test_unlabelled_users_are_rejected(self):
+        with self.assertRaisesRegex(ValueError, "1 evaluated users have no label for grouping 'custom'"):
+            self.ev.user_group_table(RECS, k=2, groupings={"custom": {"u1": "x"}})   # u2 has no label
+
+    def test_empty_recommendations(self):
+        empty = RECS.iloc[0:0]
+        table = self.ev.item_group_table(empty, k=2).set_index(["grouping", "group"]).loc["popularity"]
+        self.assertEqual(table.loc["head", "exposure_share"], 0.0)
+        self.assertEqual(table.loc["tail", "recall@2"], 0.0)
 
 
 if __name__ == "__main__":
