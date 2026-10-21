@@ -38,8 +38,8 @@ Prerequisite (step 1, train every source once and export its scores):
     python run_model.py SLIMElastic EASE ItemKNN RecVAE SimpleX BPR LightGCN ContentBased
 
 Examples:
-    python tune_hybrid_feature_aug.py                      # all targets: roughly 1.5-2 h with 10 workers
-    python tune_hybrid_feature_aug.py --targets ItemKNN EASE   # skip SLIMElastic (12 s per fit)
+    python tune_hybrid_feature_aug.py                      # all targets: ~7 h with 10 workers
+    python tune_hybrid_feature_aug.py --targets ItemKNN EASE   # skip SLIMElastic (~5 h of that)
 """
 
 import argparse

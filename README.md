@@ -401,7 +401,7 @@ python -m unittest discover -s tests/hybrid -p test_hybrid_regression.py -v
 
 > This section covers **only the Feature Augmentation hybrid**. Its files are
 > `recbole/model/general_recommender/hybrid_feature_aug.py`, `tune_hybrid_feature_aug.py`,
-> `configs/hybrid_feature_aug_best.yaml`, `tests/hybrid/test_hybrid_feature_aug.py`,
+> `run_hybrid_feature_aug.py`, `configs/hybrid_feature_aug_best.yaml`, `tests/hybrid/test_hybrid_feature_aug.py`,
 > `tests/hybrid/test_tune_hybrid_feature_aug.py` and `outputs/HybridFeatureAug/`.
 
 Source models add each user's top-`n_pseudo` unseen items to the training matrix with value
@@ -415,14 +415,15 @@ denser matrix: `R_aug = R + pseudo_weight * TopN(sources)`. With no sources it i
 | source, content | `ContentBased` |
 | target | `ItemKNN`, `EASE`, `SLIMElastic` |
 
-### Feature Augmentation: tuning on validation
+### Feature Augmentation: tuning on validation, evaluating once on test
 
 Primary selection metric: **NDCG@10**. `tune_hybrid_feature_aug.py` does not open the test split.
 
 ```bash
 python run_model.py SLIMElastic EASE ItemKNN RecVAE SimpleX BPR LightGCN ContentBased
-python tune_hybrid_feature_aug.py                          # all targets: roughly 1.5-2 h with 10 workers (estimate)
-python tune_hybrid_feature_aug.py --targets ItemKNN EASE   # without SLIMElastic: roughly 30 min
+python tune_hybrid_feature_aug.py                          # ~7 h with 10 workers (ItemKNN ~1h15, EASE ~45 min, SLIMElastic ~5 h)
+python tune_hybrid_feature_aug.py --targets ItemKNN EASE   # without SLIMElastic: ~2 h
+python run_hybrid_feature_aug.py                           # ~2 min
 ```
 
 1. **Standalone metrics and overlap** of the sources, as for the other hybrids.
@@ -454,6 +455,13 @@ interrupted run resumes; the cache is ignored when the sources, the split or the
 `split_half_valid.csv`, `split_half_summary_valid.csv`, `recs_valid.tsv`) go to
 `outputs/HybridFeatureAug/`.
 
+`run_hybrid_feature_aug.py` fits the frozen configuration exactly as on validation (target
+refitted on train + pseudo-interactions, no hyperparameter changed) and evaluates it once on
+test, hiding training and validation items as for every model. It first checks that the fit
+reproduces the validation metrics in the YAML, so it stops if the sources were re-exported
+after tuning. It compares the hybrid with every source and with the other methods' picks, and
+writes `recs_test.tsv`, `test_comparison.csv` and `test_metrics.json`.
+
 ### Feature Augmentation: tests
 
 ```bash
@@ -461,6 +469,7 @@ python -m unittest discover -s tests/hybrid -p "test_*feature_aug.py" -v
 ```
 
 ---
+
 
 # About RecBole
 
