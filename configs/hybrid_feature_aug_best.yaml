@@ -1,0 +1,105 @@
+# Selected by Greedy, valid NDCG@10 = 0.2541 (written by tune_hybrid_feature_aug.py)
+target: EASE
+target_params:
+  reg_weight: 250.0
+sources:
+- RecVAE
+- ContentBased
+n_pseudo: 20
+pseudo_weight: 0.25
+valid_metrics:
+  Recall@10: 0.26422501411649746
+  MRR@10: 0.4025017253278123
+  NDCG@10: 0.254064792751675
+  Hit@10: 0.7539766702014846
+  Precision@10: 0.15461293743372218
+primary_metric: NDCG@10
+selection_method: Greedy
+held_out_half_ndcg:
+  NoAugmentation: 0.24315679440479906
+  ContentBoosted: 0.24545577193535367
+  OnePerKind: 0.24884553888317057
+  Greedy: 0.24903095599610342
+  Exhaustive: 0.24879578309007436
+alternatives:
+  NoAugmentation:
+    target: SLIMElastic
+    target_params:
+      alpha: 0.1
+      l1_ratio: 0.005
+      positive_only: true
+      hide_item: true
+    sources: []
+    n_pseudo: 0
+    pseudo_weight: 0.0
+    valid_metrics:
+      Recall@10: 0.2567972458872481
+      MRR@10: 0.3910409197259675
+      NDCG@10: 0.24483409299622966
+      Hit@10: 0.7560975609756098
+      Precision@10: 0.14962884411452812
+  ContentBoosted:
+    target: SLIMElastic
+    target_params:
+      alpha: 0.1
+      l1_ratio: 0.005
+      positive_only: true
+      hide_item: true
+    sources:
+    - ContentBased
+    n_pseudo: 10
+    pseudo_weight: 0.25
+    valid_metrics:
+      Recall@10: 0.26030766523285287
+      MRR@10: 0.39983924994529446
+      NDCG@10: 0.2495954506084969
+      Hit@10: 0.7592788971367974
+      Precision@10: 0.15090137857900318
+  OnePerKind:
+    target: EASE
+    target_params:
+      reg_weight: 250.0
+    sources:
+    - RecVAE
+    - ContentBased
+    n_pseudo: 20
+    pseudo_weight: 0.25
+    valid_metrics:
+      Recall@10: 0.26422501411649746
+      MRR@10: 0.4025017253278123
+      NDCG@10: 0.254064792751675
+      Hit@10: 0.7539766702014846
+      Precision@10: 0.15461293743372218
+  Greedy:
+    target: EASE
+    target_params:
+      reg_weight: 250.0
+    sources:
+    - RecVAE
+    - ContentBased
+    n_pseudo: 20
+    pseudo_weight: 0.25
+    valid_metrics:
+      Recall@10: 0.26422501411649746
+      MRR@10: 0.4025017253278123
+      NDCG@10: 0.254064792751675
+      Hit@10: 0.7539766702014846
+      Precision@10: 0.15461293743372218
+  Exhaustive:
+    target: SLIMElastic
+    target_params:
+      alpha: 0.1
+      l1_ratio: 0.005
+      positive_only: true
+      hide_item: true
+    sources:
+    - LightGCN
+    - ContentBased
+    n_pseudo: 10
+    pseudo_weight: 0.25
+    valid_metrics:
+      Recall@10: 0.26453549180159686
+      MRR@10: 0.40504637344510097
+      NDCG@10: 0.25488086929505094
+      Hit@10: 0.7592788971367974
+      Precision@10: 0.15450689289501596
