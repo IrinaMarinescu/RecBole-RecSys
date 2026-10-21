@@ -23,7 +23,6 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from recbole.model.general_recommender.hybrid_feature_aug import HybridFeatureAugmentation
 from recbole.model.general_recommender.hybrid_regression import (
     METRIC_NAMES,
     TOP_K,
@@ -40,6 +39,7 @@ from tune_hybrid_feature_aug import (
     config_label,
     full_scores,
     load_recbole_train,
+    target_hybrid,
 )
 from tune_hybrid_regression import recommendation_frame
 
@@ -68,7 +68,8 @@ def main():
     with open(config_path, encoding="utf-8") as handle:
         cfg = yaml.safe_load(handle)
 
-    names = list(KINDS)
+    # Every source, plus targets that are not sources (UserKNN), for the standalone rows.
+    names = list(KINDS) + [t for t in TARGET_GRIDS if t not in KINDS]
     scores, user_ids, item_ids = load_score_stack(names)
     user_index = {user: i for i, user in enumerate(user_ids)}
     item_index = {item: i for i, item in enumerate(item_ids)}
@@ -90,7 +91,7 @@ def main():
                 recbole[target] = load_recbole_train(target)
             config, train_data = recbole[target]
             sources = [FixedScores(scores[names.index(n)], config["USER_ID_FIELD"]) for n in choice["sources"]]
-            hybrid = HybridFeatureAugmentation(config, train_data, sources, target, choice["target_params"])
+            hybrid = target_hybrid(config, train_data, sources, target, choice["target_params"])
             np.random.seed(SEED)  # as in the tuner: SLIMElastic draws from the global RNG
             hybrid.fit_augmentation(n_pseudo=choice["n_pseudo"], pseudo_weight=choice["pseudo_weight"])
             fitted[key] = full_scores(hybrid)

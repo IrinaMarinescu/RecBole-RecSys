@@ -413,25 +413,26 @@ denser matrix: `R_aug = R + pseudo_weight * TopN(sources)`. With no sources it i
 | source, neighbourhood / item-item | `SLIMElastic`, `EASE`, `ItemKNN` |
 | source, latent factor | `RecVAE`, `SimpleX`, `BPR`, `LightGCN` |
 | source, content | `ContentBased` |
-| target | `ItemKNN`, `EASE`, `SLIMElastic` |
+| target | `ItemKNN`, `UserKNN` (RecBole's ItemKNN with `knn_method: user`), `EASE`, `SLIMElastic` |
 
 ### Feature Augmentation: tuning on validation, evaluating once on test
 
 Primary selection metric: **NDCG@10**. `tune_hybrid_feature_aug.py` does not open the test split.
 
 ```bash
-python run_model.py SLIMElastic EASE ItemKNN RecVAE SimpleX BPR LightGCN ContentBased
-python tune_hybrid_feature_aug.py                          # ~7 h with 10 workers (ItemKNN ~1h15, EASE ~45 min, SLIMElastic ~5 h)
-python tune_hybrid_feature_aug.py --targets ItemKNN EASE   # without SLIMElastic: ~2 h
+python run_model.py SLIMElastic EASE ItemKNN RecVAE SimpleX BPR LightGCN ContentBased UserKNN
+python tune_hybrid_feature_aug.py                          # ~7.5 h with 10 workers (ItemKNN ~1h15, UserKNN ~25 min, EASE ~45 min, SLIMElastic ~5 h)
+python tune_hybrid_feature_aug.py --targets ItemKNN UserKNN EASE   # without SLIMElastic: ~2.5 h
 python run_hybrid_feature_aug.py                           # ~2 min
 ```
 
 1. **Standalone metrics and overlap** of the sources, as for the other hybrids.
 2. **Exhaustive search.** Every subset of the 8 sources (255, plus no sources) x `n_pseudo` in
    {2, 5, 10, 20} x `pseudo_weight` in {0.25, 0.5, 1} x target x target hyperparameters
-   (ItemKNN `k` in {100, 200, 400} x `shrink` in {0, 10}; EASE `reg_weight` in
-   {250, 500, 1000, 2000}; SLIMElastic at its tuned values only, because one fit takes about 12 s).
-   That is 33,671 configurations. Every one is fitted on train with
+   (ItemKNN `k` in {100, 200, 400} x `shrink` in {0, 10}; UserKNN `k` in {25, 50, 100} x
+   `shrink` in {0, 10}; EASE `reg_weight` in {250, 500, 1000, 2000}; SLIMElastic at its tuned
+   values only, because one fit takes about 12 s).
+   That is 52,037 configurations. Every one is fitted on train with
    `HybridFeatureAugmentation.fit_augmentation` and scored on all validation users. Source
    rankings are computed once with the hybrid's `_rank_candidates`, from the exported
    `outputs/<model>/scores.npz`.
@@ -448,8 +449,9 @@ python run_hybrid_feature_aug.py                           # ~2 min
    the search.
 
 Results of each target are cached in `outputs/HybridFeatureAug/search_cache_<target>.npz`, so an
-interrupted run resumes; the cache is ignored when the sources, the split or the grid change
-(`--no-cache` refits everything). The final configuration and every method's pick
+interrupted run resumes and adding a target does not refit the others; a target's cache is
+ignored when the sources, the split, the `n_pseudo`/`pseudo_weight` grid or that target's own
+grid change (`--no-cache` refits everything). The final configuration and every method's pick
 (`alternatives`) are written to `configs/hybrid_feature_aug_best.yaml`; the tables
 (`standalone_valid.csv`, overlap CSVs, `search_valid.csv.gz`, `greedy_path_valid.csv`,
 `split_half_valid.csv`, `split_half_summary_valid.csv`, `recs_valid.tsv`) go to

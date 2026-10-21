@@ -1,11 +1,13 @@
 """Tests for tune_hybrid_feature_aug.py: configuration fitting and selection methods."""
 
 import unittest
+from unittest import mock
 
 import numpy as np
 import scipy.sparse as sp
 import torch
 
+import tune_hybrid_feature_aug
 from recbole.model.general_recommender.hybrid_feature_aug import HybridFeatureAugmentation
 from tune_hybrid_feature_aug import (
     FixedScores,
@@ -20,6 +22,8 @@ from tune_hybrid_feature_aug import (
     no_augmentation_index,
     one_per_kind_index,
     param_grid,
+    target_hybrid,
+    target_key,
 )
 
 USER_ID, ITEM_ID = "user_id", "item_id"
@@ -35,10 +39,13 @@ def make_data(seed=0):
     return matrix, sources
 
 
+def make_config():
+    return TargetConfig(device=torch.device("cpu"), USER_ID_FIELD=USER_ID, ITEM_ID_FIELD=ITEM_ID, NEG_PREFIX="neg_")
+
+
 def make_hybrid(matrix, sources, target):
-    config = TargetConfig(device=torch.device("cpu"), USER_ID_FIELD=USER_ID, ITEM_ID_FIELD=ITEM_ID, NEG_PREFIX="neg_")
     models = [FixedScores(s, USER_ID) for s in sources]
-    return HybridFeatureAugmentation(config, TrainMatrix(matrix, USER_ID, ITEM_ID), models, target_model=target)
+    return HybridFeatureAugmentation(make_config(), TrainMatrix(matrix, USER_ID, ITEM_ID), models, target_model=target)
 
 
 class TestFitConfiguration(unittest.TestCase):
@@ -84,6 +91,21 @@ class TestFitConfiguration(unittest.TestCase):
         again = fit_configuration(search, rankings, (1,), 2, 1.0, self.PARAMS["ItemKNN"])
         np.testing.assert_array_equal(first, again)
 
+    def test_user_knn_target_is_user_based_item_knn(self):
+        matrix, sources = make_data()
+        ranker = make_hybrid(matrix, sources, "ItemKNN")
+        rankings = [ranker._rank_candidates(m, 6) for m in ranker.source_models]
+        params = {"k": 4, "shrink": 1.0}
+        search = target_hybrid(make_config(), TrainMatrix(matrix, USER_ID, ITEM_ID), [], "UserKNN")
+        got = fit_configuration(search, rankings, (0, 2), 3, 0.5, params)
+
+        fresh = make_hybrid(matrix, [sources[0], sources[2]], "ItemKNN")
+        fresh.fit_augmentation(n_pseudo=3, pseudo_weight=0.5, target_params={"knn_method": "user", **params})
+        np.testing.assert_array_equal(got, full_scores(fresh))
+
+        item_based = make_hybrid(matrix, [], "ItemKNN")
+        self.assertFalse(np.array_equal(got, fit_configuration(item_based, rankings, (0, 2), 3, 0.5, params)))
+
 
 class TestSearchSpace(unittest.TestCase):
     def test_plain_targets_first_then_subsets_by_size(self):
@@ -108,6 +130,14 @@ class TestSearchSpace(unittest.TestCase):
     def test_param_grid_is_the_product(self):
         self.assertEqual(len(param_grid("ItemKNN")), 6)
         self.assertIn({"k": 200, "shrink": 0.0}, param_grid("ItemKNN"))
+
+    def test_cache_key_of_a_target_ignores_the_other_grids(self):
+        before = {t: target_key("base", t) for t in ("ItemKNN", "UserKNN")}
+        grids = {**tune_hybrid_feature_aug.TARGET_GRIDS, "UserKNN": {"k": [7], "shrink": [0.0]}}
+        with mock.patch.object(tune_hybrid_feature_aug, "TARGET_GRIDS", grids):
+            self.assertEqual(target_key("base", "ItemKNN"), before["ItemKNN"])
+            self.assertNotEqual(target_key("base", "UserKNN"), before["UserKNN"])
+        self.assertNotEqual(target_key("other", "ItemKNN"), before["ItemKNN"])
 
 
 class TestSelection(unittest.TestCase):

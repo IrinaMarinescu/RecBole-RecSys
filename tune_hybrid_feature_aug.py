@@ -6,7 +6,8 @@ training matrix with value pseudo_weight, and the target is refitted on that mat
 (HybridFeatureAugmentation.fit_augmentation). No sources is the plain target.
 
 Sources are the eight tuned models below, read from outputs/<model>/scores.npz. Targets are
-the closed-form models ItemKNN, EASE and SLIMElastic, refitted for every configuration.
+the closed-form models ItemKNN, UserKNN (RecBole's ItemKNN with knn_method=user), EASE and
+SLIMElastic, refitted for every configuration.
 
 Steps, all on validation:
 1. Standalone metrics of every source, top-10 overlap, and the correct items one model finds
@@ -32,7 +33,8 @@ Steps, all on validation:
 The search reuses the hybrid's own code: source rankings come from _rank_candidates (computed
 once), and every configuration is fitted with fit_augmentation and scored with
 full_sort_predict. Results are cached per target in outputs/HybridFeatureAug/, so an
-interrupted run resumes; the cache is ignored when the sources, the split or the grid change.
+interrupted run resumes and a new target does not refit the others; a target's cache is
+ignored when the sources, the split, or the n_pseudo, pseudo_weight or that target's grid change.
 
 Prerequisite (step 1, train every source once and export its scores):
     python run_model.py SLIMElastic EASE ItemKNN RecVAE SimpleX BPR LightGCN ContentBased
@@ -86,9 +88,12 @@ CONTENT_SOURCE = "ContentBased"
 # n_pseudo and pseudo_weight (3,061 fits, about 10 CPU hours).
 TARGET_GRIDS = {
     "ItemKNN": {"k": [100, 200, 400], "shrink": [0.0, 10.0]},
+    "UserKNN": {"k": [25, 50, 100], "shrink": [0.0, 10.0]},
     "EASE": {"reg_weight": [250.0, 500.0, 1000.0, 2000.0]},
     "SLIMElastic": {"alpha": [0.1], "l1_ratio": [0.005]},
 }
+# Targets that are another RecBole model with fixed settings, as in configs/models/<target>.yaml.
+TARGET_MODELS = {"UserKNN": ("ItemKNN", {"knn_method": "user"})}
 N_PSEUDO_GRID = (2, 5, 10, 20)
 PSEUDO_WEIGHTS = (0.25, 0.5, 1.0)
 
@@ -149,6 +154,19 @@ class FixedScores(torch.nn.Module):
 # --------------------------------------------------------------------------- #
 # Fitting and scoring one configuration
 # --------------------------------------------------------------------------- #
+def target_model(target):
+    """(RecBole model name, fixed hyperparameters) of a target."""
+    return TARGET_MODELS.get(target, (target, {}))
+
+
+def target_hybrid(config, train_data, sources, target, target_params=None):
+    """HybridFeatureAugmentation for a target, with the target's fixed settings applied."""
+    model, fixed = target_model(target)
+    return HybridFeatureAugmentation(
+        config, train_data, sources, target_model=model, target_params={**fixed, **(target_params or {})}
+    )
+
+
 def full_scores(hybrid):
     """Scores of every user for every item [n_users - 1, n_items - 1], without RecBole's padding."""
     users = torch.arange(1, hybrid.n_users)
@@ -181,7 +199,7 @@ def _init_worker(matrix, fields, rankings, seen, relevant, targets, param_lists)
     config = TargetConfig(device=torch.device("cpu"), **fields)
     dataset = TrainMatrix(matrix, fields["USER_ID_FIELD"], fields["ITEM_ID_FIELD"])
     _state.update(
-        hybrids={t: HybridFeatureAugmentation(config, dataset, [], target_model=t) for t in targets},
+        hybrids={t: target_hybrid(config, dataset, [], t) for t in targets},
         rankings=rankings,
         seen=seen,
         relevant=relevant,
@@ -338,12 +356,18 @@ def fingerprint(*arrays, extra=""):
     return h.hexdigest()
 
 
-def run_search(pool, tasks, n_configs, n_users, out_dir, key, use_cache):
+def target_key(base_key, target):
+    """Cache key of one target: the shared inputs plus that target's own grid and settings."""
+    return fingerprint(extra=repr((base_key, target, TARGET_GRIDS[target], target_model(target))))
+
+
+def run_search(pool, tasks, n_configs, n_users, out_dir, base_key, use_cache):
     """Fit every configuration. Returns metrics [n_configs, 5] and per-user NDCG [n_configs, n_users]."""
     metrics = np.full((n_configs, len(METRIC_NAMES)), np.nan)
     ndcg = np.full((n_configs, n_users), np.nan, dtype=np.float32)
     for target, target_tasks in tasks.items():
         rows = np.concatenate([r for _, r in target_tasks])
+        key = target_key(base_key, target)
         cache = os.path.join(out_dir, f"search_cache_{target}.npz")
         if use_cache and os.path.exists(cache):
             data = np.load(cache)
@@ -459,7 +483,7 @@ def main():
               f"hyperparameter settings {TARGET_GRIDS[target]}")
     key = fingerprint(
         matrix.indptr, matrix.indices, relevant, *rankings,
-        extra=repr((names, TARGET_GRIDS, N_PSEUDO_GRID, PSEUDO_WEIGHTS, SEED)),
+        extra=repr((names, N_PSEUDO_GRID, PSEUDO_WEIGHTS, SEED)),
     )
     workers = max(1, min(args.workers, os.cpu_count() or 1))
     print(f"Fitting with {workers} workers", flush=True)
@@ -569,9 +593,10 @@ def main():
     for method in METHODS:
         i = select_index(method, full, space, names, source_full)
         target = targets[space["target"][i]]
+        model, fixed = target_model(target)
         alternatives[method] = {
             "target": target,
-            "target_params": {**HybridFeatureAugmentation._default_params(target), **choice_params(i)},
+            "target_params": {**HybridFeatureAugmentation._default_params(model), **fixed, **choice_params(i)},
             "sources": choice_sources(i),
             "n_pseudo": int(space["n_pseudo"][i]),
             "pseudo_weight": float(space["weight"][i]),
@@ -583,9 +608,7 @@ def main():
     print("\nCross-checking the final configuration with a fresh HybridFeatureAugmentation...", flush=True)
     config, train_data = load_recbole_train(final["target"])
     reference_sources = [FixedScores(scores[names.index(n)], fields["USER_ID_FIELD"]) for n in final["sources"]]
-    hybrid = HybridFeatureAugmentation(
-        config, train_data, reference_sources, final["target"], final["target_params"]
-    )
+    hybrid = target_hybrid(config, train_data, reference_sources, final["target"], final["target_params"])
     np.random.seed(SEED)
     hybrid.fit_augmentation(n_pseudo=final["n_pseudo"], pseudo_weight=final["pseudo_weight"])
     recs = recommendation_frame(full_scores(hybrid), seen, user_ids, item_ids, relevant.any(axis=1))
