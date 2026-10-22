@@ -409,11 +409,11 @@ class Evaluator:
                 hits = sum(i in self.relevant[u] for u, lst in lists.items() for i in lst if i in items)
                 rows.append({
                     "grouping": name, "group": label, "n_items": len(items),
-                    "catalog_share": len(items) / len(self.catalog),
-                    "relevant_share": relevant / n_relevant,
-                    "exposure_share": len(exposed) / n_slots,
+                    "catalog_share": len(items) / len(self.catalog) if self.catalog else float("nan"),
+                    "relevant_share": relevant / n_relevant if n_relevant else float("nan"),
+                    "exposure_share": len(exposed) / n_slots if n_slots else 0.0,
                     "hit_share": hits / n_hits if n_hits else 0.0,
                     f"recall@{k}": hits / relevant if relevant else float("nan"),
-                    f"coverage@{k}": len(set(exposed)) / len(items),
+                    f"coverage@{k}": len(set(exposed)) / len(items) if items else float("nan"),
                 })
         return pd.DataFrame(rows)
