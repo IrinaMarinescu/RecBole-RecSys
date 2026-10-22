@@ -24,7 +24,7 @@ from recbole.model.general_recommender.hybrid_regression import (
     load_score_stack,
 )
 from recbole.model.general_recommender.mixed_hybrid import evaluate_recommendations
-from recbole.utils.experiment import CONFIG_DIR, OUTPUT_DIR, load_split
+from recbole.utils.experiment import CONFIG_DIR, EXPORT_TOP_N, OUTPUT_DIR, load_split
 from tune_hybrid_regression import KINDS, recommendation_frame
 
 
@@ -92,7 +92,7 @@ def main():
         metrics, _ = evaluate_ranking(combine_scores(scores, weights), seen, relevant)
         rows.append(_row(label, f"not selected ({method})", metrics))
 
-    mixed = recommendation_frame(combined, seen, user_ids, item_ids, user_mask)
+    mixed = recommendation_frame(combined, seen, user_ids, item_ids, user_mask, top_k=EXPORT_TOP_N)  # candidates for the rerankers
     reference = evaluate_recommendations(mixed, test, k=TOP_K)
     for name in METRIC_NAMES:
         if abs(reference[name] - hybrid_metrics[name]) > 1e-8:
@@ -107,11 +107,15 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     recs_path = os.path.join(out_dir, "recs_test.tsv")
     mixed.to_csv(recs_path, sep="\t", index=False)
+    # Also the frozen configuration's validation list (training items hidden), for downstream tuning
+    # such as the rerankers.
+    valid_frame = recommendation_frame(combined, train_seen, user_ids, item_ids, valid_seen.any(axis=1), top_k=EXPORT_TOP_N)
+    valid_frame.to_csv(os.path.join(out_dir, "recs_valid.tsv"), sep="\t", index=False)
     table.to_csv(os.path.join(out_dir, "test_comparison.csv"), index=False)
     metrics_path = os.path.join(out_dir, "test_metrics.json")
     with open(metrics_path, "w", encoding="utf-8") as handle:
         json.dump({**cfg, "hybrid_regression_test": hybrid_metrics, "comparison_test": rows}, handle, indent=2)
-    print(f"Wrote {recs_path}")
+    print(f"Wrote {recs_path} and recs_valid.tsv")
     print(f"Wrote {metrics_path} and test_comparison.csv")
 
 

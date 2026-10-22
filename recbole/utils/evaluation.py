@@ -176,6 +176,20 @@ def load_item_genres(path=None):
     return {item: set(genres.split()) for item, genres in zip(items["item_id"], items["class"])}
 
 
+def load_user_demographics(path=None):
+    """DataFrame user_id, age, gender, occupation from the ML-100K user file (ids as strings)."""
+    path = path or os.path.join(REPO_DIR, "dataset", "ml-100k", "ml-100k.user")
+    users = pd.read_csv(path, sep="\t", dtype=str)
+    users.columns = [c.split(":")[0] for c in users.columns]
+    users["age"] = users["age"].astype(int)
+    return users[["user_id", "age", "gender", "occupation"]]
+
+
+def _tertiles(values, labels):
+    """{key: label} splitting a Series into three equal-size groups (ties broken by order)."""
+    return pd.qcut(values.rank(method="first"), 3, labels=labels).astype(str).to_dict()
+
+
 class Evaluator:
     """Computes all metrics for top-N lists against one ground-truth split.
 
