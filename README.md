@@ -165,6 +165,34 @@ interactions; the **short head** is the 20% most popular items, the rest is the 
 | UserNDCGGap | NDCG of active users - NDCG of inactive users (user-side fairness) |
 | TailExposure, TailHitShare | share of all recommendations / of all hits that are long-tail items (item-side fairness) |
 
+## Group analysis (Task 2.5)
+
+`run_group_analysis.py` shows for which users and items each model works well. Models are **not** retrained
+per group: each model's recommendations (trained on all users) are evaluated separately per group.
+
+```bash
+python run_group_analysis.py                 # all models, test set, k = 10
+python run_group_analysis.py SLIMElastic BPR Pop --stage valid
+```
+
+| Grouping | Groups |
+|---|---|
+| user activity | tertiles of the number of training ratings: low / medium / high |
+| user mainstreaminess | tertiles of the mean popularity of the user's training items: niche / average / mainstream |
+| gender, age, occupation | from `ml-100k.user`; age buckets <25, 25-34, 35-44, 45+ |
+| item popularity | head (top 20% by training interactions, the same short head as above) / middle (next 30%) / tail (bottom 50%) |
+| item genre | every genre of the movie (genres overlap, so their shares sum to more than 1) |
+
+It writes `outputs/evaluation/<stage>_user_group_analysis.csv` (every per-user metric averaged per user group,
+with `n_users`, `avg_test_items`, `avg_train_items` and the standard error `NDCG@k_se`) and `<stage>_item_group_analysis.csv` (per item group: `catalog_share`,
+`relevant_share`, `exposure_share`, `hit_share`, `recall@k`, `coverage@k`, `n_items`).
+
+Two cautions when reading the results:
+- **Accuracy@k rises with the number of test items a user has**, so check `avg_test_items` before comparing
+  groups. For example, niche users get *higher* NDCG than mainstream users, but most niche users are heavy users
+  with ~14 test items vs. ~4 for mainstream users: the effect is mostly user activity, not taste.
+- **Small groups are noisy.** Occupations with fewer than 20 users (e.g. 7 doctors) are in the CSV but not printed.
+
 ## Hybrid model: Mixed Hybrid (list mixing)
 
 > This section covers **only the Mixed Hybrid**. The project has several hybrid models (for
@@ -397,7 +425,81 @@ configuration once on test, next to every candidate and the other methods' picks
 python -m unittest discover -s tests/hybrid -p test_hybrid_regression.py -v
 ```
 
+## Feature Augmentation Hybrid (pseudo-interactions)
+
+> This section covers **only the Feature Augmentation hybrid**. Its files are
+> `recbole/model/general_recommender/hybrid_feature_aug.py`, `tune_hybrid_feature_aug.py`,
+> `run_hybrid_feature_aug.py`, `configs/hybrid_feature_aug_best.yaml`, `tests/hybrid/test_hybrid_feature_aug.py`,
+> `tests/hybrid/test_tune_hybrid_feature_aug.py` and `outputs/HybridFeatureAug/`.
+
+Source models add each user's top-`n_pseudo` unseen items to the training matrix with value
+`pseudo_weight` (the union over sources); a closed-form target model is then refitted on that
+denser matrix: `R_aug = R + pseudo_weight * TopN(sources)`. With no sources it is the plain target.
+
+| Role | Models |
+|------|--------|
+| source, neighbourhood / item-item | `SLIMElastic`, `EASE`, `ItemKNN` |
+| source, latent factor | `RecVAE`, `SimpleX`, `BPR`, `LightGCN` |
+| source, content | `ContentBased` |
+| target | `ItemKNN`, `UserKNN` (RecBole's ItemKNN with `knn_method: user`), `EASE`, `SLIMElastic` |
+
+### Feature Augmentation: tuning on validation, evaluating once on test
+
+Primary selection metric: **NDCG@10**. `tune_hybrid_feature_aug.py` does not open the test split.
+
+```bash
+python run_model.py SLIMElastic EASE ItemKNN RecVAE SimpleX BPR LightGCN ContentBased UserKNN
+python tune_hybrid_feature_aug.py                          # ~7.5 h with 10 workers (ItemKNN ~1h15, UserKNN ~25 min, EASE ~45 min, SLIMElastic ~5 h)
+python tune_hybrid_feature_aug.py --targets ItemKNN UserKNN EASE   # without SLIMElastic: ~2.5 h
+python run_hybrid_feature_aug.py                           # ~2 min
+```
+
+1. **Standalone metrics and overlap** of the sources, as for the other hybrids.
+2. **Exhaustive search.** Every subset of the 8 sources (255, plus no sources) x `n_pseudo` in
+   {2, 5, 10, 20} x `pseudo_weight` in {0.25, 0.5, 1} x target x target hyperparameters
+   (ItemKNN `k` in {100, 200, 400} x `shrink` in {0, 10}; UserKNN `k` in {25, 50, 100} x
+   `shrink` in {0, 10}; EASE `reg_weight` in {250, 500, 1000, 2000}; SLIMElastic at its tuned
+   values only, because one fit takes about 12 s).
+   That is 52,037 configurations. Every one is fitted on train with
+   `HybridFeatureAugmentation.fit_augmentation` and scored on all validation users. Source
+   rankings are computed once with the hybrid's `_rank_candidates`, from the exported
+   `outputs/<model>/scores.npz`.
+3. **Choice of selection method.** `NoAugmentation` (best plain target), `ContentBoosted`
+   (ContentBased as the only source on that target, only `n_pseudo` and `pseudo_weight` tuned;
+   content-boosted CF, Melville et al., 2002), `OnePerKind` (best source of each kind, then the
+   best subset of those), `Greedy` (start from no augmentation, add the source that most improves
+   NDCG@10, retuning everything else, stop when nothing helps) and `Exhaustive` (best overall).
+   As for the other hybrids, each method selects on one half of the validation users and is
+   scored on the other (20 folds); the best mean held-out NDCG@10 wins, ties go to the simpler
+   method.
+4. **Cross-check.** The final configuration is refitted with a fresh `HybridFeatureAugmentation`
+   on RecBole's own dataset and evaluated with `evaluate_recommendations`; the result must equal
+   the search.
+
+Results of each target are cached in `outputs/HybridFeatureAug/search_cache_<target>.npz`, so an
+interrupted run resumes and adding a target does not refit the others; a target's cache is
+ignored when the sources, the split, the `n_pseudo`/`pseudo_weight` grid or that target's own
+grid change (`--no-cache` refits everything). The final configuration and every method's pick
+(`alternatives`) are written to `configs/hybrid_feature_aug_best.yaml`; the tables
+(`standalone_valid.csv`, overlap CSVs, `search_valid.csv.gz`, `greedy_path_valid.csv`,
+`split_half_valid.csv`, `split_half_summary_valid.csv`, `recs_valid.tsv`) go to
+`outputs/HybridFeatureAug/`.
+
+`run_hybrid_feature_aug.py` fits the frozen configuration exactly as on validation (target
+refitted on train + pseudo-interactions, no hyperparameter changed) and evaluates it once on
+test, hiding training and validation items as for every model. It first checks that the fit
+reproduces the validation metrics in the YAML, so it stops if the sources were re-exported
+after tuning. It compares the hybrid with every source and with the other methods' picks, and
+writes `recs_test.tsv`, `test_comparison.csv` and `test_metrics.json`.
+
+### Feature Augmentation: tests
+
+```bash
+python -m unittest discover -s tests/hybrid -p "test_*feature_aug.py" -v
+```
+
 ---
+
 
 # About RecBole
 

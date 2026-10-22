@@ -152,7 +152,10 @@ def novelty(ranked, item_popularity, n_users):
     """Mean self-information -log2(p(i)) of the list; p(i) = share of users who interacted with i.
 
     Uses add-one smoothing, so items without training interactions get a finite (maximal) value.
+    nan for an empty list.
     """
+    if not ranked:
+        return float("nan")
     return float(np.mean([-math.log2((item_popularity.get(i, 0) + 1) / (n_users + 1)) for i in ranked]))
 
 
@@ -174,6 +177,20 @@ def load_item_genres(path=None):
     items = pd.read_csv(path, sep="\t", dtype=str, quoting=3)  # quoting=3: quotes in descriptions are text
     items.columns = [c.split(":")[0] for c in items.columns]   # "class:token_seq" -> "class"
     return {item: set(genres.split()) for item, genres in zip(items["item_id"], items["class"])}
+
+
+def load_user_demographics(path=None):
+    """DataFrame user_id, age, gender, occupation from the ML-100K user file (ids as strings)."""
+    path = path or os.path.join(REPO_DIR, "dataset", "ml-100k", "ml-100k.user")
+    users = pd.read_csv(path, sep="\t", dtype=str)
+    users.columns = [c.split(":")[0] for c in users.columns]
+    users["age"] = users["age"].astype(int)
+    return users[["user_id", "age", "gender", "occupation"]]
+
+
+def _tertiles(values, labels):
+    """{key: label} splitting a Series into three equal-size groups (ties broken by order)."""
+    return pd.qcut(values.rank(method="first"), 3, labels=labels).astype(str).to_dict()
 
 
 class Evaluator:
@@ -234,12 +251,13 @@ class Evaluator:
             row = {"user_id": user, "user_group": self.user_group(user)}
             row.update({f"{name}@{k}": fn(ranked, relevant, k) for name, fn in ACCURACY_METRICS.items()})
             profile_pop = np.mean([self.item_popularity.get(i, 0) for i in history]) if history else 0.0
-            arp = np.mean([self.item_popularity.get(i, 0) for i in ranked])
+            # A user without recommendations gets nan for the list averages instead of a numpy warning.
+            arp = np.mean([self.item_popularity.get(i, 0) for i in ranked]) if ranked else float("nan")
             row.update({
                 f"ILD@{k}": intra_list_diversity(ranked, self.item_genres),
                 f"Novelty@{k}": novelty(ranked, self.item_popularity, self.n_users),
                 f"ARP@{k}": arp,
-                f"APLT@{k}": np.mean([i not in self.short_head for i in ranked]),
+                f"APLT@{k}": np.mean([i not in self.short_head for i in ranked]) if ranked else float("nan"),
                 f"PopLift@{k}": (arp - profile_pop) / profile_pop if profile_pop else 0.0,
                 f"Miscalibration@{k}": miscalibration(history, ranked, self.item_genres) if history else 0.0,
             })
@@ -341,17 +359,26 @@ class Evaluator:
     def user_group_table(self, recs, k=10, groupings=None):
         """Every per-user metric averaged within each user group; one row per (grouping, group).
 
-        avg_test_items is reported because accuracy@k rises with the number of relevant items a user has,
-        so groups that differ in it (e.g. niche users are mostly heavy users) are not directly comparable.
+        avg_test_items and avg_train_items are reported because accuracy@k rises with the number of relevant
+        items a user has, so groups that differ in them (e.g. niche users are mostly heavy users) are not
+        directly comparable. NDCG@k_se is the standard error of the group's mean NDCG, to judge whether a gap
+        between groups is larger than noise (it is nan for a group of one user).
+        Raises ValueError if an evaluated user has no label in a grouping, instead of silently dropping them.
         """
         users, _ = self.per_user(recs, k)
         metrics = users.drop(columns=["user_id", "user_group"])
         metrics.insert(0, "avg_test_items", users["user_id"].map(lambda u: len(self.relevant[u])))
+        metrics.insert(1, "avg_train_items", users["user_id"].map(lambda u: len(self.history.get(u, []))))
+        ndcg = f"NDCG@{k}"
         rows = []
         for name, labels in (groupings or self.user_groupings()).items():
             group = users["user_id"].map(labels)
+            if group.isna().any():
+                raise ValueError(f"{int(group.isna().sum())} evaluated users have no label for grouping {name!r}")
             for label, part in metrics.groupby(group):
-                rows.append({"grouping": name, "group": label, "n_users": len(part), **part.mean().to_dict()})
+                values = part.mean().to_dict()
+                values[f"{ndcg}_se"] = part[ndcg].std(ddof=1) / np.sqrt(len(part))
+                rows.append({"grouping": name, "group": label, "n_users": len(part), **values})
         return pd.DataFrame(rows)
 
     def item_group_table(self, recs, k=10, groupings=None):
