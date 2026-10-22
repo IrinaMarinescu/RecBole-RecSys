@@ -67,6 +67,7 @@ class GroupTableTest(unittest.TestCase):
         self.assertAlmostEqual(table.loc["tail", "recall@2"], 1 / 2)
         self.assertTrue(math.isnan(table.loc["head", "recall@2"]))   # no relevant head items
         self.assertAlmostEqual(table.loc["tail", "coverage@2"], 1 / 5)
+        
 
     def test_user_group_table(self):
         table = self.ev.user_group_table(RECS, k=2).set_index(["grouping", "group"])
