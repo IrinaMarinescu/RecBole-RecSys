@@ -40,7 +40,7 @@ import numpy as np
 import pandas as pd
 import yaml
 
-from recbole.utils.experiment import CONFIG_DIR, OUTPUT_DIR, load_split
+from recbole.utils.experiment import CONFIG_DIR, EXPORT_TOP_N, OUTPUT_DIR, load_split
 from recbole.model.general_recommender.mixed_hybrid import (
     PRIMARY_METRIC,
     TOP_K,
@@ -352,7 +352,9 @@ def main():
         order_table.to_csv(os.path.join(out_dir, "order_search_valid.csv"), index=False)
 
     # Cross-check the final configuration with the reference (pandas) implementation.
-    mixed = mix_recommendations(sources, final["models"], final["quotas"])
+    # Export EXPORT_TOP_N items (the rerankers need candidates beyond the top-10); mixing is prefix-consistent,
+    # so the top-10, and the metrics checked here, are the same as with top_k = 10.
+    mixed = mix_recommendations(sources, final["models"], final["quotas"], top_k=EXPORT_TOP_N)
     reference = evaluate_recommendations(mixed, valid)
     for name in METRIC_NAMES:
         assert abs(reference[name] - final["valid_metrics"][name]) < 1e-9, (name, reference[name], final["valid_metrics"][name])
