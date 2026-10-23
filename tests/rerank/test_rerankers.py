@@ -10,8 +10,11 @@ from recbole.model.general_recommender.rerankers import (
     PopularityDiscount,
     Reranker,
     _relevance,
+    base_relevance_frame,
+    budget_sensitivity,
     build_rerankers,
     genre_similarity,
+    output_name,
     rerank,
     select_lambda,
 )
@@ -247,6 +250,53 @@ class SelectLambdaTest(unittest.TestCase):
     def test_needs_reference_row(self):
         with self.assertRaises(ValueError):
             select_lambda(self.TABLE[self.TABLE["lambda"] > 0], "ILD@10", True)
+
+    def test_lambda_zero_is_always_admissible(self):
+        # every lambda > 0 breaks the budget or widens the gap: the base list is selected, no error
+        table = pd.DataFrame({
+            "lambda":          [0.0, 0.5, 1.0],
+            "inactive_weight": [1.0, 1.0, 0.0],
+            "NDCG@10":         [0.25, 0.245, 0.10],
+            "TailExposure@10": [0.05, 0.10, 0.30],
+            "UserNDCGGap@10":  [0.18, 0.20, 0.01],
+        })
+        best = select_lambda(table, "TailExposure@10", True, max_loss=0.05, no_worse=[("UserNDCGGap@10", False)])
+        self.assertEqual(best["lambda"], 0.0)
+
+    def test_nan_reference_raises(self):
+        table = self.TABLE.copy()
+        table.loc[0, "NDCG@10"] = float("nan")
+        with self.assertRaises(ValueError):
+            select_lambda(table, "ILD@10", True)
+
+
+class BudgetSensitivityTest(unittest.TestCase):
+    def test_budgets_buy_more_target(self):
+        sens = budget_sensitivity(SelectLambdaTest.TABLE, "ILD@10", True, [0.0, 0.02, 0.05, 0.1])
+        self.assertEqual(sens["lambda"].tolist(), [0.0, 0.2, 0.4, 0.6])  # floors 0.25, 0.245, 0.2375, 0.225
+        self.assertEqual(sens["admissible"].tolist(), [1, 2, 3, 4])
+        self.assertEqual(sens["target_gain_pct"].iloc[0], 0.0)
+        self.assertTrue((sens["ILD@10"].diff().dropna() >= 0).all())
+        self.assertAlmostEqual(sens["target_gain_pct"].iloc[-1], 40.0)  # 0.70 vs 0.50
+        self.assertTrue(sens["inactive_weight"].isna().all())
+
+    def test_lower_is_better_gain_is_positive(self):
+        sens = budget_sensitivity(SelectLambdaTest.TABLE, "Miscalibration@10", False, [0.1])
+        self.assertEqual(sens["lambda"].iloc[0], 0.6)
+        self.assertAlmostEqual(sens["target_gain_pct"].iloc[0], 100 * (0.30 - 0.10) / 0.30)
+
+
+class OutputLayoutTest(unittest.TestCase):
+    def test_output_name(self):
+        self.assertEqual(output_name("MMR"), "Rerank_MMR")
+        self.assertEqual(output_name("MMR", "RecVAE"), "Rerank_MMR/RecVAE")
+
+    def test_base_relevance_frame(self):
+        frame = _recs({"u": [("a1", 0.9), ("c1", 0.8)]})
+        self.assertIs(base_relevance_frame(frame), frame)
+        mixed = frame.assign(source=["BPR", "RecVAE"], score=[3.0, 0.9])  # scores from different models
+        self.assertEqual(base_relevance_frame(mixed)["score"].tolist(), [-1.0, -2.0])
+        self.assertEqual(_items(rerank(base_relevance_frame(mixed), ConstantObjective(), 0.5, 2)), ["a1", "c1"])
 
 
 if __name__ == "__main__":

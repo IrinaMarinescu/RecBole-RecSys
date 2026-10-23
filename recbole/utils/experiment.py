@@ -211,7 +211,10 @@ def _top_n(scores, mask, n, dataset):
     })
 
 
-def export(experiment, config, dataset, model, train_data, valid_data, test_data, result, top_n=100):
+EXPORT_TOP_N = 100  # length of every exported list; the rerankers pick their top-k from these candidates
+
+
+def export(experiment, config, dataset, model, train_data, valid_data, test_data, result, top_n=EXPORT_TOP_N):
     out_dir = os.path.join(OUTPUT_DIR, experiment)
     os.makedirs(out_dir, exist_ok=True)
     export_split(dataset, train_data, valid_data, test_data)

@@ -296,8 +296,9 @@ def pack_choice(names, columns, C, penalty, num_negatives, weight_row, metric_ro
     }
 
 
-def recommendation_frame(combined, seen, user_ids, item_ids, user_mask):
-    chosen, chosen_scores = top_k_items(combined, seen, TOP_K)
+def recommendation_frame(combined, seen, user_ids, item_ids, user_mask, top_k=TOP_K):
+    """Top-k unseen items per evaluated user as a recs_<stage>.tsv frame (user_id, item_id, rank, score)."""
+    chosen, chosen_scores = top_k_items(combined, seen, top_k)
     rows = []
     for user in np.flatnonzero(user_mask):
         for rank, (item, score) in enumerate(zip(chosen[user], chosen_scores[user]), start=1):
@@ -309,7 +310,7 @@ def recommendation_frame(combined, seen, user_ids, item_ids, user_mask):
 
 def main():
     from recbole.model.general_recommender.mixed_hybrid import evaluate_recommendations
-    from recbole.utils.experiment import CONFIG_DIR, OUTPUT_DIR, SPLIT_DIR
+    from recbole.utils.experiment import CONFIG_DIR, EXPORT_TOP_N, OUTPUT_DIR, SPLIT_DIR
 
     out_dir = os.path.join(OUTPUT_DIR, "HybridRegression")
     os.makedirs(out_dir, exist_ok=True)
@@ -548,7 +549,7 @@ def main():
         weight_vector[names.index(name)] = weight
     combined = combine_scores(scores, weight_vector)
     user_mask = relevant.any(axis=1)
-    mixed = recommendation_frame(combined, seen, user_ids, item_ids, user_mask)
+    mixed = recommendation_frame(combined, seen, user_ids, item_ids, user_mask, top_k=EXPORT_TOP_N)  # candidates for the rerankers
     reference = evaluate_recommendations(mixed, valid, k=TOP_K)
     for name in METRIC_NAMES:
         if abs(reference[name] - final["valid_metrics"][name]) > 1e-8:

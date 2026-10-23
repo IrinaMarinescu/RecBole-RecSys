@@ -17,7 +17,7 @@ import os
 import pandas as pd
 import yaml
 
-from recbole.utils.experiment import CONFIG_DIR, OUTPUT_DIR, load_split
+from recbole.utils.experiment import CONFIG_DIR, EXPORT_TOP_N, OUTPUT_DIR, load_split
 from recbole.model.general_recommender.mixed_hybrid import (
     evaluate_recommendations,
     load_sources,
@@ -45,7 +45,7 @@ def main():
     for name in CANDIDATES:
         rows.append({"model": name, "role": "standalone", **evaluate_recommendations(sources[name], test)})
 
-    mixed = mix_recommendations(sources, models, quotas)
+    mixed = mix_recommendations(sources, models, quotas, top_k=EXPORT_TOP_N)  # 100 candidates for the rerankers
     hybrid = evaluate_recommendations(mixed, test)
     rows.append({"model": f"Mixed Hybrid: {quotas_to_label(quotas)}", "role": f"FINAL ({cfg['selection_method']})", **hybrid})
 
@@ -63,13 +63,18 @@ def main():
     out_dir = os.path.join(OUTPUT_DIR, "MixedHybrid")
     recs_path = os.path.join(out_dir, "recs_test.tsv")
     save_recommendations(mixed, recs_path)
+    # Also the frozen configuration's validation list, so that downstream tuning (e.g. the rerankers)
+    # uses the same configuration on validation and test without re-running the whole search.
+    valid_sources = load_sources(CANDIDATES, stage="valid")
+    save_recommendations(mix_recommendations(valid_sources, models, quotas, top_k=EXPORT_TOP_N),
+                         os.path.join(out_dir, "recs_valid.tsv"))
     table.to_csv(os.path.join(out_dir, "test_comparison.csv"), index=False)
     metrics_path = os.path.join(out_dir, "test_metrics.json")
     with open(metrics_path, "w", encoding="utf-8") as f:
         json.dump({**cfg, "mixed_hybrid_test": hybrid, "comparison_test": rows}, f, indent=2)
 
     print()
-    print(f"Wrote {recs_path}")
+    print(f"Wrote {recs_path} and recs_valid.tsv")
     print(f"Wrote {metrics_path} and test_comparison.csv")
 
 

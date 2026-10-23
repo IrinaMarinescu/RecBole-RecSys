@@ -1,4 +1,5 @@
 import math
+import os
 from collections import Counter
 from typing import Dict, Iterable, List, Mapping, Sequence, Set, Tuple
 
@@ -12,13 +13,26 @@ PRIMARY_METRIC = "NDCG@10"   # same as valid_metric in configs/base.yaml
 MAX_ACCURACY_LOSS = 0.05     # tuning: accept at most this relative drop in the primary metric vs lambda = 0
 RERANKER_NAMES = ("MMR", "Calibration", "Fairness", "Popularity")
 EXPOSURE_TARGETS = ("equity", "parity")
+HYBRID_BASES = ("MixedHybrid", "HybridRegression")  # base models that are not run by run_model.py
 
 ItemGenres = Mapping[str, Set[str]]
 
 
-def output_name(reranker_name: str) -> str:
-    """Directory under outputs/ for a reranker's lists, e.g. Rerank_MMR."""
-    return f"Rerank_{reranker_name}"
+def output_name(reranker_name: str, base: str = None) -> str:
+    """Directory under outputs/ for a reranker's lists: Rerank_MMR, or Rerank_MMR/RecVAE for a given base model."""
+    name = f"Rerank_{reranker_name}"
+    return name if base is None else os.path.join(name, base)
+
+
+def base_relevance_frame(recs: pd.DataFrame) -> pd.DataFrame:
+    """The base list with a score the greedy loop can normalise.
+
+    A list-mixing hybrid (frame with a `source` column) carries each source model's own score, which are
+    on different scales, so its order is the only usable relevance: score = -rank. Other frames are returned as is.
+    """
+    if "source" in recs.columns:
+        return recs.assign(score=-recs["rank"].astype(float))
+    return recs
 
 
 # --------------------------------------------------------------------------- #
@@ -247,7 +261,22 @@ def select_lambda(table: pd.DataFrame, target: str, higher_is_better: bool, prim
     Selecting on accuracy alone would always return lambda = 0, so the accuracy loss is a constraint
     and the beyond-accuracy target the objective. Ties go to the smallest lambda, then (if the table
     has an `inactive_weight` column) to the largest weight, i.e. the most equal treatment of users.
+    The lambda = 0 row always satisfies the constraints, so lambda = 0 is returned (the reranker is not
+    applied) when no other setting fits the budget.
     """
+    ref, allowed = _admissible(table, primary, max_loss, no_worse)
+    if allowed.empty:
+        raise ValueError(f"no admissible setting for {target}: is {primary} NaN in the lambda = 0 row?")
+    keys, ascending = [target, "lambda"], [not higher_is_better, True]
+    if "inactive_weight" in table.columns:
+        keys.append("inactive_weight")
+        ascending.append(False)
+    return allowed.sort_values(keys, ascending=ascending, kind="mergesort").iloc[0]
+
+
+def _admissible(table: pd.DataFrame, primary: str, max_loss: float,
+                no_worse: Sequence[Tuple[str, bool]]) -> Tuple[pd.Series, pd.DataFrame]:
+    """The lambda = 0 row and the rows within `max_loss` of it on `primary` and no worse on `no_worse`."""
     reference = table[table["lambda"] == 0.0]
     if reference.empty:
         raise ValueError("the table needs a lambda = 0 row as the accuracy reference")
@@ -255,8 +284,27 @@ def select_lambda(table: pd.DataFrame, target: str, higher_is_better: bool, prim
     allowed = table[table[primary] >= (1 - max_loss) * float(ref[primary])]
     for metric, better in no_worse:
         allowed = allowed[allowed[metric] >= ref[metric]] if better else allowed[allowed[metric] <= ref[metric]]
-    keys, ascending = [target, "lambda"], [not higher_is_better, True]
-    if "inactive_weight" in table.columns:
-        keys.append("inactive_weight")
-        ascending.append(False)
-    return allowed.sort_values(keys, ascending=ascending, kind="mergesort").iloc[0]
+    return ref, allowed
+
+
+def budget_sensitivity(table: pd.DataFrame, target: str, higher_is_better: bool, budgets: Sequence[float],
+                       primary: str = PRIMARY_METRIC, no_worse: Sequence[Tuple[str, bool]] = ()) -> pd.DataFrame:
+    """`select_lambda` for several accuracy budgets: what each budget buys on the target.
+
+    One row per budget: max_loss, lambda, inactive_weight (NaN without that column), the primary and target
+    values of the selected setting, target_gain_pct (relative change of the target vs lambda = 0, signed so
+    that positive = better) and admissible (number of settings within the budget).
+    """
+    rows = []
+    for budget in budgets:
+        ref, allowed = _admissible(table, primary, budget, no_worse)
+        best = select_lambda(table, target, higher_is_better, primary, budget, no_worse)
+        sign = 1.0 if higher_is_better else -1.0
+        gain = sign * 100.0 * (best[target] - ref[target]) / abs(ref[target]) if ref[target] else float("nan")
+        rows.append({
+            "max_loss": budget, "lambda": float(best["lambda"]),
+            "inactive_weight": float(best["inactive_weight"]) if "inactive_weight" in table.columns else float("nan"),
+            primary: float(best[primary]), target: float(best[target]),
+            "target_gain_pct": float(gain), "admissible": int(len(allowed)),
+        })
+    return pd.DataFrame(rows)
