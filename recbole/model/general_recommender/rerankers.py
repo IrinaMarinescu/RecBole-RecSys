@@ -13,7 +13,7 @@ PRIMARY_METRIC = "NDCG@10"   # same as valid_metric in configs/base.yaml
 MAX_ACCURACY_LOSS = 0.05     # tuning: accept at most this relative drop in the primary metric vs lambda = 0
 RERANKER_NAMES = ("MMR", "Calibration", "Fairness", "Popularity")
 EXPOSURE_TARGETS = ("equity", "parity")
-HYBRID_BASES = ("MixedHybrid", "HybridRegression")  # base models that are not run by run_model.py
+HYBRID_BASES = ("MixedHybrid", "HybridRegression", "HybridFeatureAug")  # base models that are not run by run_model.py
 
 ItemGenres = Mapping[str, Set[str]]
 

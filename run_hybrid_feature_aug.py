@@ -10,7 +10,8 @@ Before the test, the fit must reproduce the validation metrics stored in the YAM
 the sources were re-exported after tuning and the script stops.
 
 Compares the hybrid with every source model, and with the configurations the other selection
-methods picked on validation (for the report only; nothing is selected on test).
+methods picked on validation (for the report only; nothing is selected on test). Exports the
+frozen configuration's test and validation lists (EXPORT_TOP_N items) as candidates for the rerankers.
 
 Example:
     python run_hybrid_feature_aug.py
@@ -30,7 +31,7 @@ from recbole.model.general_recommender.hybrid_regression import (
     load_score_stack,
 )
 from recbole.model.general_recommender.mixed_hybrid import evaluate_recommendations
-from recbole.utils.experiment import CONFIG_DIR, OUTPUT_DIR, load_split
+from recbole.utils.experiment import CONFIG_DIR, EXPORT_TOP_N, OUTPUT_DIR, load_split
 from tune_hybrid_feature_aug import (
     KINDS,
     SEED,
@@ -125,7 +126,7 @@ def main():
         metrics, _ = evaluate_ranking(fit(alt), seen, relevant)
         rows.append({"model": _label(alt), "role": f"not selected ({method})", **metrics})
 
-    recs = recommendation_frame(combined, seen, user_ids, item_ids, relevant.any(axis=1))
+    recs = recommendation_frame(combined, seen, user_ids, item_ids, relevant.any(axis=1), top_k=EXPORT_TOP_N)  # candidates for the rerankers
     reference = evaluate_recommendations(recs, test, k=TOP_K)
     for name in METRIC_NAMES:
         if abs(reference[name] - hybrid_metrics[name]) > 1e-8:
@@ -141,11 +142,15 @@ def main():
     os.makedirs(out_dir, exist_ok=True)
     recs_path = os.path.join(out_dir, "recs_test.tsv")
     recs.to_csv(recs_path, sep="\t", index=False)
+    # Also the frozen configuration's validation list (training items hidden), for downstream tuning
+    # such as the rerankers.
+    valid_frame = recommendation_frame(combined, train_seen, user_ids, item_ids, valid_relevant.any(axis=1), top_k=EXPORT_TOP_N)
+    valid_frame.to_csv(os.path.join(out_dir, "recs_valid.tsv"), sep="\t", index=False)
     table.to_csv(os.path.join(out_dir, "test_comparison.csv"), index=False)
     metrics_path = os.path.join(out_dir, "test_metrics.json")
     with open(metrics_path, "w", encoding="utf-8") as handle:
         json.dump({**cfg, "feature_aug_test": hybrid_metrics, "comparison_test": rows}, handle, indent=2)
-    print(f"Wrote {recs_path}")
+    print(f"Wrote {recs_path} and recs_valid.tsv")
     print(f"Wrote {metrics_path} and test_comparison.csv")
 
 

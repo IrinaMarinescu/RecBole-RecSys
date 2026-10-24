@@ -34,9 +34,9 @@ valid_metrics:
   Precision@10: 0.15949098621420998
 held_out_half_ndcg:
   BestSingle: 0.24831351845647895
-  OnePerKind: 0.2569678248957434
-  Greedy: 0.25663003587550814
-  Exhaustive: 0.25763497991930306
+  OnePerKind: 0.2569537364924787
+  Greedy: 0.25634157582908307
+  Exhaustive: 0.2577027444362551
 alternatives:
   BestSingle:
     models:
@@ -62,13 +62,13 @@ alternatives:
       penalty: l1
       num_negatives: 5
     ranking_weights:
-      RecVAE: 0.562450647354126
-      SLIMElastic: 5.118310928344727
-      ContentBased: 1.5533671379089355
+      RecVAE: 0.5624527335166931
+      SLIMElastic: 5.118595600128174
+      ContentBased: 1.553493857383728
     normalized_weights:
-      RecVAE: 0.0777496046339521
-      SLIMElastic: 0.7075227896784455
-      ContentBased: 0.2147276056876024
+      RecVAE: 0.07774544935465011
+      SLIMElastic: 0.7075217014389159
+      ContentBased: 0.214732849206434
     valid_metrics:
       Recall@10: 0.27065218240202604
       MRR@10: 0.40542510394048037

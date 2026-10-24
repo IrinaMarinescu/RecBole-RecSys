@@ -102,7 +102,12 @@ def main():
 
     out_dir = os.path.join(OUTPUT_DIR, "evaluation")
     os.makedirs(out_dir, exist_ok=True)
-    pd.DataFrame(rows).to_csv(os.path.join(out_dir, "rerank_test_comparison.csv"), index=False)
+    path = os.path.join(out_dir, "rerank_test_comparison.csv")
+    table = pd.DataFrame(rows)
+    if args.bases and os.path.exists(path):  # with --bases, keep the rows of the bases that were not rerun
+        previous = pd.read_csv(path)
+        table = pd.concat([previous[~previous["base"].isin(bases)], table], ignore_index=True)
+    table.to_csv(path, index=False)
     print("Wrote outputs/Rerank_<reranker>/<base>/recs_test.tsv, test_metrics.json"
           + ("" if args.no_test_sweep else " and sweep_test.csv"))
     print(f"Wrote {out_dir}/rerank_test_comparison.csv")
