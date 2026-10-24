@@ -14,6 +14,7 @@ docs/build/
 wandb/*
 /ray_log*
 
+.ipynb_checkpoints/
 # Project: generated results (regenerate with `python run_model.py all`) and local environments
 /outputs/
 /log/
