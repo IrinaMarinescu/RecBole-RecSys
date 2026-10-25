@@ -140,11 +140,88 @@ class SummaryTest(unittest.TestCase):
         per_user = {(b, r): users for b in ("A", "B") for r in ("none", "MMR", "Popularity")}
         significance = ana.significance_table(per_user, K)
         text = ana.summary_markdown("A", K, CONFIGS, COMPARISON, deltas, side, budget, significance, None, None, [], 0.05)
-        for n in range(1, 8):
+        for n in range(1, 9):
             self.assertIn(f"## {n}.", text)
         self.assertIn("Not applied", text)  # B + Popularity has lambda = 0
         self.assertIn("B + Popularity", text)
         self.assertIn("+MMR (λ=0.3)", text)
+        self.assertIn("(skipped: needs MixedHybrid", text)  # no order table given
+        # report tables: both bases have a usable NDCG, so nothing is dropped; the target is bold; absolutes are given
+        self.assertIn("### 3b. Report table (Task 3.2): mean (min … max) change in % over 2 bases\n", text)
+        self.assertIn("| Changed@10 ", text)
+        self.assertIn("**+22.5 (+20.0 … +25.0)**", text.split("### 3b.")[1].split("## 4.")[0])  # MMR's ILD: A +20%, B +25%
+        self.assertIn("Absolute APLT@10 over these bases: base lists 0.050–0.100", text)
+        self.assertIn("### 4b. Report table (Task 3.2)", text)
+
+
+class _CountingEvaluator:
+    """Stands in for Evaluator: NDCG = share of the top-k starting with 'x', ILD = length of the top-k."""
+
+    def evaluate(self, recs, k):
+        top = recs[recs["rank"] <= k]
+        return {f"NDCG@{k}": float(top["item_id"].str.startswith("x").mean()), f"ILD@{k}": float(len(top))}
+
+
+def _list(user_items):
+    return pd.DataFrame([{"user_id": u, "item_id": i, "rank": r, "score": float(10 - r)}
+                         for u, items in user_items.items() for r, i in enumerate(items, start=1)])
+
+
+class GroupReportTest(unittest.TestCase):
+    def test_user_group_deltas(self):
+        def row(base, reranker, group, ndcg, ild):
+            return {"base": base, "reranker": reranker, "grouping": "activity", "group": group, "NDCG@10": ndcg, "ILD@10": ild}
+        ug = pd.DataFrame([row("A", "none", "low", 0.20, 0.5), row("A", "MMR", "low", 0.18, 0.6),
+                           row("B", "none", "low", 0.10, 0.4), row("B", "MMR", "low", 0.10, 0.5),
+                           row("C", "none", "low", 0.10, 0.4), row("C", "MMR", "low", 0.05, 0.9)])  # C is left out
+        d = ana.user_group_deltas(ug, K, bases=["A", "B"]).set_index(["grouping", "group", "reranker"])
+        self.assertEqual(len(d), 1)
+        self.assertAlmostEqual(d.loc[("activity", "low", "MMR"), "NDCG@10_pct"], -5.0)  # mean of -10% and 0%
+        self.assertAlmostEqual(d.loc[("activity", "low", "MMR"), "ILD@10_d"], 0.1)
+        self.assertNotIn("APLT@10_d", d.columns)  # only the metrics present
+
+    def test_item_group_means(self):
+        ig = pd.DataFrame([{"base": b, "reranker": r, "grouping": "popularity", "group": "tail", "exposure_share": e,
+                            "hit_share": 0.0, "recall@10": 0.0, "catalog_share": 0.5}
+                           for b, r, e in (("A", "none", 0.0), ("A", "Fairness", 0.2), ("B", "none", 0.1), ("B", "Fairness", 0.4))])
+        m = ana.item_group_means(ig).set_index(["reranker", "group"])
+        self.assertAlmostEqual(m.loc[("Fairness", "tail"), "exposure_share"], 0.3)
+        self.assertEqual(m.columns.tolist(), ["exposure_share", "hit_share", "recall@10"])
+
+
+class OrderTest(unittest.TestCase):
+    HYBRID = {"none": _list({"u": ["x1", "x2"]}), "MMR": _list({"u": ["x1", "z"]}), "Popularity": _list({"u": ["x1", "x2"]})}
+    SOURCES = {("MMR", "X"): _list({"u": ["x1", "x3"]}), ("MMR", "Y"): _list({"u": ["y1", "x1"]})}  # none for Popularity
+
+    def test_order_table(self):
+        table = ana.order_table(_CountingEvaluator(), self.HYBRID, self.SOURCES, ["X", "Y"], {"X": 1, "Y": 1}, 2)
+        self.assertEqual(table["order"].tolist(), ["base", "rerank → mix", "mix → rerank"])  # Popularity is skipped
+        self.assertEqual(table["reranker"].tolist(), ["none", "MMR", "MMR"])
+        # rerank → mix = x1 (from X), y1 (from Y); mix → rerank = x1, z: one of the two items is shared
+        self.assertAlmostEqual(table.loc[1, "NDCG@2"], 0.5)
+        self.assertAlmostEqual(table.loc[2, "NDCG@2"], 0.5)
+        self.assertAlmostEqual(table.loc[1, "Shared@2"], 0.5)
+        self.assertAlmostEqual(table.loc[2, "Shared@2"], 0.5)
+        self.assertTrue(np.isnan(table.loc[0, "Shared@2"]))
+
+    def test_summary_section(self):
+        deltas = ana.relative_deltas(COMPARISON, K)
+        side = ana.side_effects(deltas, TARGETS, K)
+        budget = ana.budget_table(SWEEPS, CONFIGS, [0.0, 0.05, 0.3], K)
+        users = pd.DataFrame({"user_id": [f"u{i}" for i in range(5)], "NDCG@10": np.linspace(0, 1, 5),
+                              "ILD@10": 0.5, "APLT@10": 0.1})
+        per_user = {(b, r): users for b in ("A", "B") for r in ("none", "MMR", "Popularity")}
+        significance = ana.significance_table(per_user, K)
+        order = ana.order_table(_CountingEvaluator(), self.HYBRID, self.SOURCES, ["X", "Y"], {"X": 1, "Y": 1}, K)
+        order.attrs["hybrid"] = "MixedHybrid: X=1, Y=1"
+        text = ana.summary_markdown("A", K, CONFIGS, COMPARISON, deltas, side, budget, significance, None, None, [],
+                                    0.05, order)
+        self.assertIn("## 7. Order of composition", text)
+        self.assertIn("MixedHybrid: X=1, Y=1", text)
+        self.assertIn("| +MMR, rerank → mix", text)
+        self.assertIn("| +MMR, mix → rerank", text)
+        self.assertIn("**", text.split("## 7.")[1].split("## 8.")[0])  # the target (ILD) is bold
+        self.assertIn("## 8. Figures", text)
 
 
 if __name__ == "__main__":

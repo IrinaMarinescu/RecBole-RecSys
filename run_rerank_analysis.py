@@ -14,16 +14,21 @@ import os
 
 import numpy as np
 import pandas as pd
+import yaml
 from scipy import stats
 
+from recbole.model.general_recommender.mixed_hybrid import mix_recommendations
 from recbole.model.general_recommender.rerankers import HYBRID_BASES, RERANKER_NAMES, budget_sensitivity, output_name
 from recbole.utils.evaluation import GROUP_ORDER, Evaluator
-from recbole.utils.experiment import OUTPUT_DIR, load_recs
+from recbole.utils.experiment import CONFIG_DIR, OUTPUT_DIR, load_recs
 from tune_mixed_hybrid import KINDS
 from tune_rerankers import configured_bases, load_rerank_config, no_worse_for
 
 EVAL_DIR = os.path.join(OUTPUT_DIR, "evaluation")
 FIG_DIR = os.path.join(EVAL_DIR, "figures")
+MIXED_CONFIG = os.path.join(CONFIG_DIR, "mixed_hybrid_best.yaml")  # the frozen recipe for the order-of-composition table
+ORDER_METRICS = ["NDCG", "ILD", "Miscalibration", "APLT", "Coverage", "Gini"]  # columns of that table
+REPORT_METRICS = ["NDCG", "ILD", "Miscalibration", "APLT", "Coverage", "Gini", "UserNDCGGap"]  # rows of the Task 3.2 table
 ACCURACY = ["NDCG", "Recall", "Precision", "MRR"]
 BEYOND = ["ILD", "Miscalibration", "Novelty", "APLT", "TailExposure", "Coverage", "Gini", "UserNDCGGap", "TailHitShare"]
 LOWER_IS_BETTER = {"Miscalibration", "Gini", "UserNDCGGap"}
@@ -197,6 +202,61 @@ def group_tables(evaluator, lists, k):
     return tidy(users), tidy(items)
 
 
+def user_group_deltas(user_groups, k, bases=None):
+    """Task 3.4: per (grouping, group, reranker), the mean over the bases of the change vs the base list —
+    NDCG@k in %, ILD / Miscalibration / APLT (the rerankers' per-user targets) in absolute points."""
+    ug = user_groups if bases is None else user_groups[user_groups["base"].isin(bases)]
+    keys, primary = ["base", "grouping", "group"], f"NDCG@{k}"
+    targets = [f"{m}@{k}" for m in ("ILD", "Miscalibration", "APLT") if f"{m}@{k}" in ug.columns]
+    base = ug[ug["reranker"] == "none"].set_index(keys)[[primary] + targets]
+    out = ug[ug["reranker"] != "none"].set_index(keys)
+    ref = base.reindex(out.index)
+    delta = pd.DataFrame({"reranker": out["reranker"].to_numpy()}, index=out.index)
+    delta[f"{primary}_pct"] = (100 * (out[primary] - ref[primary]) / ref[primary].abs()).to_numpy()
+    for m in targets:
+        delta[f"{m}_d"] = (out[m] - ref[m]).to_numpy()
+    values = [c for c in delta.columns if c != "reranker"]
+    return delta.reset_index().groupby(["grouping", "group", "reranker"], sort=False)[values].mean().reset_index()
+
+
+def item_group_means(item_groups, bases=None):
+    """Task 3.4: per (reranker, group), the mean over the bases of the group's exposure share, hit share and recall@k."""
+    ig = item_groups if bases is None else item_groups[item_groups["base"].isin(bases)]
+    cols = [c for c in ig.columns if c in ("exposure_share", "hit_share") or c.startswith("recall@")]
+    return ig.groupby(["reranker", "group"], sort=False)[cols].mean().reset_index()
+
+
+def shared_share(a, b, k):
+    """Mean share of the top-k that two lists of the same users have in common."""
+    top_a = a[a["rank"] <= k].groupby("user_id")["item_id"].agg(set)
+    top_b = b[b["rank"] <= k].groupby("user_id")["item_id"].agg(set)
+    users = top_a.index.intersection(top_b.index)
+    return float(np.mean([len(top_a[u] & top_b[u]) / k for u in users])) if len(users) else float("nan")
+
+
+def order_table(evaluator, hybrid_lists, source_lists, models, quotas, k):
+    """Task 3.3: the two orders of composing the Mixed Hybrid with a reranker, one row per list.
+
+    `rerank → mix` mixes the sources' reranked lists with the frozen quotas; `mix → rerank` is the reranked
+    Mixed Hybrid list. Nothing is selected here: every list is at the setting chosen for it on validation.
+    hybrid_lists: {'none': base list, <reranker>: reranked hybrid list}; source_lists: {(<reranker>, <model>):
+    that source's reranked list}. A reranker without every source's list is skipped. Shared@k is the share of
+    the top-k the two orders have in common.
+    """
+    def metrics(recs):
+        return {m: float(v) for m, v in evaluator.evaluate(recs, k).items()}
+
+    rows = [{"reranker": "none", "order": "base", f"Shared@{k}": float("nan"), **metrics(hybrid_lists["none"])}]
+    for name in RERANKER_NAMES:
+        if name not in hybrid_lists or any((name, m) not in source_lists for m in models):
+            continue
+        mixed = mix_recommendations({m: source_lists[(name, m)] for m in models}, models, quotas, top_k=k)
+        shared = shared_share(mixed, hybrid_lists[name], k)
+        rows.append({"reranker": name, "order": "rerank → mix", f"Shared@{k}": shared, **metrics(mixed)})
+        rows.append({"reranker": name, "order": "mix → rerank", f"Shared@{k}": shared, **metrics(hybrid_lists[name])})
+    return pd.DataFrame(rows)
+
+
 # --------------------------------------------------------------------------- #
 # Summary (markdown)
 # --------------------------------------------------------------------------- #
@@ -204,8 +264,13 @@ def _fmt_setting(lam, weight):
     return f"λ={lam:g}" + ("" if pd.isna(weight) else f", w={weight:g}")
 
 
+def _shown_target(target):
+    """The metric name a target is shown under in the compact tables (TailExposure equals APLT over full lists)."""
+    return {"TailExposure": "APLT"}.get(metric_name(target), metric_name(target))
+
+
 def summary_markdown(main, k, configs, comparison, deltas, side, budget, significance, user_groups, item_groups,
-                     figures, max_loss):
+                     figures, max_loss, order=None):
     primary = f"NDCG@{k}"
     targets = {n: c["target"] for n, c in configs[main]["rerankers"].items()}
     bases = list(configs)
@@ -266,6 +331,39 @@ def summary_markdown(main, k, configs, comparison, deltas, side, budget, signifi
         table[f"+{n}"] = col
     out.append(table.to_markdown() + "\n")
 
+    # 3b. the compact version for the report (Task 3.2): the metrics the rerankers move, bases with a usable NDCG only
+    kept = [b for b in bases if b not in low.index]
+    dropped = [b for b in bases if b not in kept]
+    report = side_effects(deltas[deltas["base"].isin(kept)], targets, k) if dropped else side
+    out.append(f"### 3b. Report table (Task 3.2): mean (min … max) change in % over {len(kept)} bases"
+               + (f", without {', '.join(dropped)}" if dropped else "") + "\n")
+    out.append(f"**bold** = the reranker's target; Changed@{k} = mean share of the top-{k} that was not in the base top-{k}.\n")
+    report_rows = [f"{m}@{k}" for m in REPORT_METRICS if f"{m}@{k}" in set(report["metric"])]
+    table = pd.DataFrame(index=report_rows + [f"Changed@{k}"])
+    for n in RERANKER_NAMES:
+        s = report[report["reranker"] == n].set_index("metric")
+        if s.empty:
+            continue
+        col = []
+        for m in report_rows:
+            r = s.loc[m]
+            text = f"{r['mean_pct']:+.1f} ({r['min_pct']:+.1f} … {r['max_pct']:+.1f})"
+            col.append(f"**{text}**" if metric_name(m) == _shown_target(targets[n]) else text)
+        changed = deltas[(deltas["reranker"] == n) & deltas["base"].isin(kept)][f"Changed@{k}"]
+        table[f"+{n}"] = col + [f"{changed.mean():.2f}"]
+    out.append(table.to_markdown() + "\n")
+    aplt = f"APLT@{k}"
+    if aplt in comparison.columns:  # the tail metrics' relative changes are dominated by near-zero base values
+        in_kept = comparison[comparison["base"].isin(kept)]
+
+        def span(name):
+            v = in_kept[in_kept["reranker"] == name][aplt]
+            return f"{v.min():.3f}–{v.max():.3f}" if len(v) else "n/a"
+
+        out.append(f"Absolute {aplt} over these bases: base lists {span('none')}, after Fairness {span('Fairness')}, "
+                   f"after Popularity {span('Popularity')}; the relative changes of the tail metrics are dominated by "
+                   "near-zero base values.\n")
+
     # 4. budget
     out.append(f"## 4. Accuracy budget: what a larger accepted NDCG loss buys ({main}, test)\n")
     b = budget[budget["base"] == main]
@@ -283,12 +381,28 @@ def summary_markdown(main, k, configs, comparison, deltas, side, budget, signifi
     out.append(f"At the default budget ({max_loss:.0%}) λ = 0 is selected for {int((default['lambda'] == 0).sum())} "
                f"of {len(default)} (base, reranker) pairs.\n")
 
+    # 4b. the same averaged over the bases of the report table
+    in_kept = budget[budget["base"].isin(kept)]
+    out.append(f"### 4b. Report table (Task 3.2): mean over the {len(kept)} bases of what each budget buys on test\n")
+    out.append("Cell: change of the target metric, change of NDCG@k (mean over the bases, each at the setting that budget "
+               "selects on validation); (n× λ=0) = bases where nothing fit the budget.\n")
+    table = pd.DataFrame(index=[f"{x:.0%}" for x in sorted(in_kept["max_loss"].unique())])
+    for n in RERANKER_NAMES:
+        part = in_kept[in_kept["reranker"] == n]
+        if part.empty:
+            continue
+        agg = part.groupby("max_loss").agg(gain=("test_target_gain_pct", "mean"), loss=("test_NDCG_loss_pct", "mean"),
+                                           off=("lambda", lambda s: int((s == 0).sum()))).sort_index()
+        table[f"+{n}"] = [f"{r['gain']:+.0f}% {metric_name(targets[n])}, {-r['loss']:+.1f}% NDCG"
+                          + (f" ({int(r['off'])}× λ=0)" if r["off"] else "") for _, r in agg.iterrows()]
+    out.append(table.to_markdown() + "\n")
+
     # 5. groups
     if item_groups is not None:
         out.append(f"## 5. Groups ({main})\n")
         ig = item_groups[(item_groups["base"] == main)]
-        order = ["none"] + [n for n in RERANKER_NAMES if n in set(ig["reranker"])]
-        pivot = ig.pivot_table(index="reranker", columns="group", values="exposure_share").reindex(order)
+        shown = ["none"] + [n for n in RERANKER_NAMES if n in set(ig["reranker"])]
+        pivot = ig.pivot_table(index="reranker", columns="group", values="exposure_share").reindex(shown)
         pivot = pivot[[g for g in ("head", "middle", "tail") if g in pivot.columns]]
         catalog = ig.drop_duplicates("group").set_index("group")["catalog_share"]
         pivot.loc["(catalogue share)"] = catalog.reindex(pivot.columns)
@@ -297,12 +411,42 @@ def summary_markdown(main, k, configs, comparison, deltas, side, budget, signifi
         ug = user_groups[user_groups["base"] == main]
         for grouping in ("activity", "mainstreaminess"):
             part = ug[ug["grouping"] == grouping]
-            pivot = part.pivot_table(index="reranker", columns="group", values=primary).reindex(order)
+            pivot = part.pivot_table(index="reranker", columns="group", values=primary).reindex(shown)
             pivot = pivot[[g for g in GROUP_ORDER.get(grouping, pivot.columns) if g in pivot.columns]]
             sizes = part.drop_duplicates("group").set_index("group")["n_users"]
             pivot.columns = [f"{g} (n={sizes[g]})" for g in pivot.columns]
             out.append(f"{primary} per user {grouping} group:\n")
             out.append(pivot.map(lambda v: f"{v:.4f}").to_markdown() + "\n")
+
+        # 5b. the same over the bases of the report table (Task 3.4)
+        out.append(f"### 5b. Report tables (Task 3.4): mean over the {len(kept)} bases\n")
+        ud = user_group_deltas(user_groups, k, kept)
+        out.append(f"User groups — cell: change of {primary} in % and of the reranker's per-user target (ILD, "
+                   "Miscalibration or APLT) in absolute points, vs the base list. Groups are tertiles of the training "
+                   "history: activity = its size, mainstreaminess = the mean popularity of its items.\n")
+        rows = [(g, lab) for g in ("activity", "mainstreaminess") for lab in GROUP_ORDER.get(g, [])
+                if ((ud["grouping"] == g) & (ud["group"] == lab)).any()]
+        table = pd.DataFrame(index=[f"{g}: {lab}" for g, lab in rows])
+        for n in RERANKER_NAMES:
+            part = ud[ud["reranker"] == n].set_index(["grouping", "group"])
+            if part.empty:
+                continue
+            t = f"{PER_USER_TARGET[n]}@{k}"
+            table[f"+{n}"] = [f"{part.loc[key, f'{primary}_pct']:+.1f}% NDCG, {metric_name(t)} {part.loc[key, f'{t}_d']:+.3f}"
+                              for key in rows]
+        out.append(table.to_markdown() + "\n")
+        im = item_group_means(item_groups, kept)
+        recall = next(c for c in im.columns if c.startswith("recall@"))
+        out.append(f"Item popularity groups — cell: share of the recommendation slots / share of the hits / {recall} of "
+                   "the group's relevant items. Head = the 20% most interacted items of the training set.\n")
+        lists_shown = ["none"] + [n for n in RERANKER_NAMES if n in set(im["reranker"])]
+        groups = [g for g in ("head", "middle", "tail") if g in set(im["group"])]
+        table = pd.DataFrame(index=["base list" if r == "none" else f"+{r}" for r in lists_shown])
+        for g in groups:
+            part = im[im["group"] == g].set_index("reranker").reindex(lists_shown)
+            table[g] = [f"{r['exposure_share']:.1%} / {r['hit_share']:.1%} / {r[recall]:.3f}" for _, r in part.iterrows()]
+        table.loc["(catalogue share)"] = [f"{catalog[g]:.0%}" for g in groups]
+        out.append(table.to_markdown() + "\n")
     else:
         out.append("## 5. Groups\n\n(skipped with --no-groups)\n")
 
@@ -319,8 +463,32 @@ def summary_markdown(main, k, configs, comparison, deltas, side, budget, signifi
     out.append(f"Over all bases: the NDCG drop is significant (p < 0.05) for {len(sig_drop)} of {len(ndcg)} reranked "
                f"lists, the target improvement for {len(sig_gain)} of {len(tgt)}.\n")
 
-    # 7. figures and notes
-    out.append("## 7. Figures and notes\n")
+    # 7. order of composition (Task 3.3): rerank the sources then mix, vs mix then rerank
+    out.append("## 7. Order of composition: rerank the sources, then mix vs mix, then rerank\n")
+    if order is not None and len(order) > 1:
+        hybrid = order.attrs.get("hybrid", "MixedHybrid")
+        out.append(f"{hybrid}. `rerank → mix`: each source's test list reranked at its own validation-selected setting, "
+                   "then mixed with the frozen quotas. `mix → rerank`: the Mixed Hybrid list reranked at the setting "
+                   f"selected for it. Cell: value (change vs the Mixed Hybrid list); **bold** = the reranker's target. "
+                   f"Shared@{k}: share of the top-{k} the two orders have in common.\n")
+        cols = [f"{m}@{k}" for m in ORDER_METRICS if f"{m}@{k}" in order.columns]
+        base_row = order[order["order"] == "base"].iloc[0]
+        index, cells = [f"{hybrid.split(':')[0]} (no reranker)"], [[f"{base_row[c]:.4f}" for c in cols] + ["-"]]
+        for _, r in order[order["order"] != "base"].iterrows():
+            bold = _shown_target(targets[r["reranker"]])
+            row = []
+            for c in cols:
+                text = f"{r[c]:.4f} ({signed_pct(r[c], base_row[c], c):+.1f}%)"
+                row.append(f"**{text}**" if metric_name(c) == bold else text)
+            index.append(f"+{r['reranker']}, {r['order']}")
+            cells.append(row + [f"{r[f'Shared@{k}']:.2f}"])
+        out.append(pd.DataFrame(cells, index=index, columns=cols + [f"Shared@{k}"]).to_markdown() + "\n")
+    else:
+        out.append("(skipped: needs MixedHybrid among the bases, configs/mixed_hybrid_best.yaml and the reranked "
+                   "test lists of its source models)\n")
+
+    # 8. figures and notes
+    out.append("## 8. Figures and notes\n")
     out.extend(f"- `figures/{f}`" for f in figures)
     if not figures:
         out.append("- (figures not generated; run without --no-figures)")
@@ -597,6 +765,24 @@ def main():
     significance.to_csv(os.path.join(EVAL_DIR, "rerank_significance.csv"), index=False)
     print("tables: significance", flush=True)
 
+    order = None
+    if "MixedHybrid" in bases and os.path.exists(MIXED_CONFIG):
+        with open(MIXED_CONFIG, encoding="utf-8") as f:
+            mixed_cfg = yaml.safe_load(f)
+        models, quotas = mixed_cfg["models"], mixed_cfg["quotas"]
+        hybrid_lists = {name: lists[("MixedHybrid", name)] for name in ["none"] + list(configs["MixedHybrid"]["rerankers"])}
+        source_lists = {}
+        for name in configs["MixedHybrid"]["rerankers"]:
+            for model in models:
+                if os.path.exists(os.path.join(OUTPUT_DIR, output_name(name, model), "recs_test.tsv")):
+                    source_lists[(name, model)] = load_recs(output_name(name, model), "test")
+                else:
+                    print(f"Warning: no reranked test list for {model} + {name}; the order table skips {name}")
+        order = order_table(evaluator, hybrid_lists, source_lists, models, quotas, k)
+        order.attrs["hybrid"] = "MixedHybrid: " + ", ".join(f"{m}={quotas[m]}" for m in models)
+        order.to_csv(os.path.join(EVAL_DIR, "rerank_order_comparison.csv"), index=False)
+        print("tables: order of composition", flush=True)
+
     user_groups = item_groups = None
     if not args.no_groups:
         user_groups, item_groups = group_tables(evaluator, lists, k)
@@ -607,11 +793,13 @@ def main():
     figures = [] if args.no_figures else make_figures(sweeps, deltas, side, budget, user_groups, item_groups, configs,
                                                       main_base, k, max_loss)
     summary = summary_markdown(main_base, k, configs, comparison, deltas, side, budget, significance, user_groups,
-                               item_groups, figures, max_loss)
+                               item_groups, figures, max_loss, order)
     with open(os.path.join(EVAL_DIR, "rerank_summary.md"), "w", encoding="utf-8") as f:
         f.write(summary)
     print(summary)
     written = ["sweeps", "test_deltas", "side_effects", "budget_sensitivity", "significance"]
+    if order is not None:
+        written.append("order_comparison")
     if not args.no_groups:
         written += ["user_group_analysis", "item_group_analysis"]
     print(f"Wrote {EVAL_DIR}/rerank_{{{','.join(written)}}}.csv and rerank_summary.md")
