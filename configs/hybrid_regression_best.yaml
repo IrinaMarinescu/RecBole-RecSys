@@ -11,19 +11,19 @@ hyperparams:
   penalty: l2
   num_negatives: 1
 ranking_weights:
-  RecVAE: 0.2987433075904846
-  SLIMElastic: 4.026289463043213
-  LightGCN: 0.33193501830101013
+  RecVAE: 0.2987433671951294
+  SLIMElastic: 4.026290416717529
+  LightGCN: 0.3319350481033325
   SimpleX: -2.661059856414795
-  ItemKNN: 0.010960779152810574
-  ContentBased: 1.7178245782852173
+  ItemKNN: 0.010960721410810947
+  ContentBased: 1.7178233861923218
 normalized_weights:
-  RecVAE: 0.08020614969718971
-  SLIMElastic: 1.0809720826942715
-  LightGCN: 0.0891174098001391
-  SimpleX: -0.7144373104731111
-  ItemKNN: 0.0029427333472964545
-  ContentBased: 0.46119893493421443
+  RecVAE: 0.08020617015191019
+  SLIMElastic: 1.0809723987388884
+  LightGCN: 0.0891174227482311
+  SimpleX: -0.7144373501307395
+  ItemKNN: 0.0029427180081590806
+  ContentBased: 0.4611986404835508
 primary_metric: NDCG@10
 selection_method: Exhaustive
 valid_metrics:
@@ -34,9 +34,9 @@ valid_metrics:
   Precision@10: 0.15949098621420998
 held_out_half_ndcg:
   BestSingle: 0.24831351845647895
-  OnePerKind: 0.25695200893530623
-  Greedy: 0.25622125739041074
-  Exhaustive: 0.2576357301298976
+  OnePerKind: 0.2569537364924787
+  Greedy: 0.25634157582908307
+  Exhaustive: 0.2577027444362551
 alternatives:
   BestSingle:
     models:
@@ -62,17 +62,17 @@ alternatives:
       penalty: l1
       num_negatives: 5
     ranking_weights:
-      RecVAE: 0.5623847842216492
-      SLIMElastic: 5.118721008300781
-      ContentBased: 1.5535401105880737
+      RecVAE: 0.5624527335166931
+      SLIMElastic: 5.118595600128174
+      ContentBased: 1.553493857383728
     normalized_weights:
-      RecVAE: 0.07773494262930744
-      SLIMElastic: 0.7075288931694652
-      ContentBased: 0.21473616420122732
+      RecVAE: 0.07774544935465011
+      SLIMElastic: 0.7075217014389159
+      ContentBased: 0.214732849206434
     valid_metrics:
       Recall@10: 0.27065218240202604
       MRR@10: 0.40542510394048037
-      NDCG@10: 0.2597849318895182
+      NDCG@10: 0.25978076147577206
       Hit@10: 0.7709437963944857
       Precision@10: 0.15843054082714744
   Greedy:
@@ -88,19 +88,19 @@ alternatives:
       penalty: l2
       num_negatives: 1
     ranking_weights:
-      RecVAE: 0.2987433075904846
-      SLIMElastic: 4.026289463043213
-      LightGCN: 0.33193501830101013
+      RecVAE: 0.2987433671951294
+      SLIMElastic: 4.026290416717529
+      LightGCN: 0.3319350481033325
       SimpleX: -2.661059856414795
-      ItemKNN: 0.010960779152810574
-      ContentBased: 1.7178245782852173
+      ItemKNN: 0.010960721410810947
+      ContentBased: 1.7178233861923218
     normalized_weights:
-      RecVAE: 0.08020614969718971
-      SLIMElastic: 1.0809720826942715
-      LightGCN: 0.0891174098001391
-      SimpleX: -0.7144373104731111
-      ItemKNN: 0.0029427333472964545
-      ContentBased: 0.46119893493421443
+      RecVAE: 0.08020617015191019
+      SLIMElastic: 1.0809723987388884
+      LightGCN: 0.0891174227482311
+      SimpleX: -0.7144373501307395
+      ItemKNN: 0.0029427180081590806
+      ContentBased: 0.4611986404835508
     valid_metrics:
       Recall@10: 0.27183599049656504
       MRR@10: 0.4140790957599017
@@ -120,19 +120,19 @@ alternatives:
       penalty: l2
       num_negatives: 1
     ranking_weights:
-      RecVAE: 0.2987433075904846
-      SLIMElastic: 4.026289463043213
-      LightGCN: 0.33193501830101013
+      RecVAE: 0.2987433671951294
+      SLIMElastic: 4.026290416717529
+      LightGCN: 0.3319350481033325
       SimpleX: -2.661059856414795
-      ItemKNN: 0.010960779152810574
-      ContentBased: 1.7178245782852173
+      ItemKNN: 0.010960721410810947
+      ContentBased: 1.7178233861923218
     normalized_weights:
-      RecVAE: 0.08020614969718971
-      SLIMElastic: 1.0809720826942715
-      LightGCN: 0.0891174098001391
-      SimpleX: -0.7144373104731111
-      ItemKNN: 0.0029427333472964545
-      ContentBased: 0.46119893493421443
+      RecVAE: 0.08020617015191019
+      SLIMElastic: 1.0809723987388884
+      LightGCN: 0.0891174227482311
+      SimpleX: -0.7144373501307395
+      ItemKNN: 0.0029427180081590806
+      ContentBased: 0.4611986404835508
     valid_metrics:
       Recall@10: 0.27183599049656504
       MRR@10: 0.4140790957599017

@@ -11,7 +11,7 @@ import argparse
 
 import yaml
 
-from recbole.utils.experiment import experiment_names, export, train
+from recbole.utils.experiment import EXPORT_TOP_N, experiment_names, export, train
 
 
 def main():
@@ -20,7 +20,7 @@ def main():
     parser.add_argument("--set", nargs=2, action="append", default=[], metavar=("KEY", "VALUE"),
                         help="override a config value, e.g. --set k 50")
     parser.add_argument("--no-tuned", action="store_true", help="ignore configs/tuned/<experiment>.yaml")
-    parser.add_argument("--top-n", type=int, default=100, help="length of the exported recommendation lists")
+    parser.add_argument("--top-n", type=int, default=EXPORT_TOP_N, help="length of the exported recommendation lists")
     args = parser.parse_args()
 
     experiments = experiment_names() if args.experiments == ["all"] else args.experiments
