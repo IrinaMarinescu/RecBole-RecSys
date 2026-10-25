@@ -1,5 +1,9 @@
 # DSAIT4335 Recommender Systems: Final Project
 
+> To re-run the experiments behind the report (exact commands and frozen configs),
+see [REPRODUCE.md](REPRODUCE.md). The sections below go into more detail on each
+component.
+
 This repository is a fork of [RecBole](https://github.com/RUCAIBox/RecBole), extended for the course
 project on MovieLens 100K. RecBole's original documentation follows [below](#about-recbole).
 
